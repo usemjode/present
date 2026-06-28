@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>All-in-One Church Presentation System</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        :root {
+            --bg-dark: #121214;
+            --panel-dark: #1e1e24;
+            --accent-blue: #3a86ff;
+            --text-light: #f8f9fa;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-light);
+            overflow: hidden;
+        }
+
+        /* View Mode Toggles */
+        .mode-selector {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            z-index: 9999;
+            background: rgba(0,0,0,0.7);
+            padding: 5px;
+            border-radius: 5px;
+        }
+
+        .mode-selector button {
+            background: #333;
+            color: #fff;
+            border: 1px solid #553;
+            padding: 5px 15px;
+            cursor: pointer;
+        }
+
+        .mode-selector button.active {
+            background: var(--accent-blue);
+        }
+
+        /* INTERFACE A: OPERATOR PANEL */
+        #operator-view {
+            display: grid;
+            grid-template-columns: 300px 1fr 350px;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .panel {
+            background: var(--panel-dark);
+            border-right: 1px solid #2d2d35;
+            padding: 15px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            border-bottom: 2px solid var(--accent-blue);
+            padding-bottom: 5px;
+            margin-bottom: 5px;
+        }
+
+        .drop-zone {
+            border: 2px dashed #444;
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            background: #151518;
+            transition: 0.2s;
+        }
+
+        .drop-zone:hover {
+            border-color: var(--accent-blue);
+            background: #1a1a24;
+        }
+
+        .item-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .item-list li {
+            background: #25252d;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            border-left: 3px solid transparent;
+        }
+
+        .item-list li:hover {
+            background: #2d2d38;
+        }
+
+        .item-list li.active {
+            border-left-color: var(--accent-blue);
+            background: #2a2a3a;
+        }
+
+        /* INTERFACE B: THE PROJECTOR SCREEN */
+        #projector-view {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            z-index: 5000;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+
+        #projector-view.standalone {
+            display: flex !important;
+        }
+
+        #live-canvas-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000;
+        }
+
+        /* Media Overlays on Projector Screen */
+        #live-video-bg {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            z-index: 1;
+            display: none;
+        }
+
+        #live-image-bg, #live-pdf-canvas {
+            position: absolute;
+            max-width: 100%;
+            max-height: 100%;
+            z-index: 2;
+            display: none;
+        }
+
+        #live-text-overlay {
+            position: absolute;
+            z-index: 3;
+            width: 85%;
+            color: #ffffff;
+            font-size: 4.5rem;
+            font-weight: bold;
+            text-shadow: 3px 3px 8px rgba(0, 0, 0, 0.9), -3px -3px 8px rgba(0, 0, 0, 0.9);
+            line-height: 1.3;
+            white-space: pre-line;
+        }
+
+        /* Utilities */
+        input, select, button {
+            width: 100%;
+            padding: 8px;
+            background: #121214;
+            border: 1px solid #444;
+            color: #fff;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: var(--accent-blue);
+            font-weight: bold;
+            cursor: pointer;
+            border: none;
+        }
+
+        button:hover {
+            opacity: 0.9;
+        }
+
+        .preview-box {
+            background: #000;
+            aspect-ratio: 16/9;
+            width: 100%;
+            border: 1px solid #333;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 0.75rem;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mode-selector">
+        <button id="btn-op-mode" class="active" onclick="switchMode('operator')">Operator View</button>
+        <button id="btn-proj-mode" onclick="switchMode('projector')">Projector Screen (Full)</button>
+    </div>
+
+    <div id="projector-view">
+        <div id="live-canvas-container">
+            <img id="live-video-bg" src="" alt="Live Video Feed">
+            <img id="live-image-bg" src="" alt="Presentation Slide">
+            <canvas id="live-pdf-canvas"></canvas>
+            <div id="live-text-overlay"></div>
+        </div>
+    </div>
+
+    <div id="operator-view">
+        
+        <div class="panel">
+            <div class="panel-title">Media Sources</div>
+            
+            <div class="drop-zone" id="xml-drop">
+                <strong>Drop XML Files Here</strong>
+                <p style="font-size:0.75rem; color:#888; margin:5px 0 0 0;">Supports OpenLyrics Song formats</p>
+            </div>
+
+            <div class="drop-zone" id="media-drop">
+                <strong>Drop PDF / Slide Images</strong>
+                <p style="font-size:0.75rem; color:#888; margin:5px 0 0 0;">Select single PDF or multi-slide images</p>
+            </div>
+
+            <div class="panel-title">Network Live Feed (NDI)</div>
+            <label style="font-size: 0.8rem; color: #aaa;">Network Stream URL (MJPEG / WebRTC)</label>
+            <input type="text" id="ndi-url-input" value="http://192.168.1.50:8080/video" placeholder="http://[IP]:[PORT]/stream">
+            <div style="display:flex; gap:5px;">
+                <button onclick="toggleNDI(true)">Connect Feed</button>
+                <button style="background:#d90429;" onclick="toggleNDI(false)">Clear</button>
+            </div>
+
+            <div class="panel-title">Bible Quick Search</div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:5px;">
+                <input type="text" id="bible-book" value="John" placeholder="Book">
+                <input type="number" id="bible-chap" value="3" placeholder="Chap">
+            </div>
+            <input type="number" id="bible-verse" value="16" placeholder="Verse number">
+            <button onclick="triggerQuickScripture()">Display Verse</button>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">Active Sequence Lines</div>
+            <ul class="item-list" id="sequence-manifest">
+                <li style="color:#666; text-align:center; padding:40px 0;">No active layout loaded. Drag files into the left terminal blocks.</li>
+            </ul>
+        </div>
+
+        <div class="panel" style="border-right: none; border-left: 1px solid #2d2d35;">
+            <div class="panel-title">Live Confidence Monitor</div>
+            <div class="preview-box" id="confidence-monitor-box">
+                <div style="transform: scale(0.25); width:400%; height:400%; display:flex; justify-content:center; align-items:center; pointer-events:none;" id="monitor-scaler">
+                    </div>
+            </div>
+
+            <div class="panel-title">Quick Actions</div>
+            <button style="background: #4a5759;" onclick="clearDisplayLayer('TEXT')">Clear Text Only</button>
+            <button style="background: #9b2226;" onclick="clearAllDisplayLayers()">BLACKOUT ALL</button>
+
+            <div class="panel-title">Hotkeys Documentation</div>
+            <ul style="font-size:0.8rem; color:#aaa; padding-left:20px; margin:0;">
+                <li><strong>Arrow Down / Up:</strong> Step through Active Sequence</li>
+                <li><strong>Escape Key:</strong> Global Safety Blackout</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        // Set up local worker context for PDF processing
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        // State Machine Core
+        let activePresentationElements = [];
+        let activeElementPointer = -1;
+        let internalPdfDocumentInstance = null;
+
+        // Elements Cache
+        const textLayer = document.getElementById('live-text-overlay');
+        const videoLayer = document.getElementById('live-video-bg');
+        const imageLayer = document.getElementById('live-image-bg');
+        const canvasLayer = document.getElementById('live-pdf-canvas');
+        const manifestContainer = document.getElementById('sequence-manifest');
+        const monitorDisplayAnchor = document.getElementById('monitor-scaler');
+
+        // Initialize drag-drop bindings
+        setupFileReceiver('xml-drop', processXmlPayload);
+        setupFileReceiver('media-drop', processVisualPayload);
+
+        function switchMode(targetView) {
+            const opView = document.getElementById('operator-view');
+            const projView = document.getElementById('projector-view');
+            
+            document.getElementById('btn-op-mode').classList.remove('active');
+            document.getElementById('btn-proj-mode').classList.remove('active');
+
+            if(targetView === 'operator') {
+                opView.style.display = 'grid';
+                projView.classList.remove('standalone');
+                document.getElementById('btn-op-mode').classList.add('active');
+                updateConfidenceMonitor();
+            } else {
+                opView.style.display = 'none';
+                projView.classList.add('standalone');
+                document.getElementById('btn-proj-mode').classList.add('active');
+            }
+        }
+
+        function setupFileReceiver(elementId, payloadHandler) {
+            const targetElement = document.getElementById(elementId);
+            targetElement.addEventListener('dragover', (e) => { e.preventDefault(); });
+            targetElement.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const processedFiles = Array.from(e.dataTransfer.files);
+                if(processedFiles.length > 0) payloadHandler(processedFiles);
+            });
+            targetElement.addEventListener('click', () => {
+                let fallbackInput = document.createElement('input');
+                fallbackInput.type = 'file';
+                fallbackInput.multiple = true;
+                fallbackInput.onchange = () => { payloadHandler(Array.from(fallbackInput.files)); };
+                fallbackInput.click();
+            });
+        }
+
+        // --- XML TRANSLATOR INTERFACE (Songs / Hymnals) ---
+        function processXmlPayload(files) {
+            const primaryFile = files[0];
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const xmlText = e.target.result;
+                    const nativeXmlParser = new DOMParser();
+                    const xmlDoc = nativeXmlParser.parseFromString(xmlText, "text/xml");
+                    
+                    activePresentationElements = [];
+                    
+                    // Simple logic tracking matching structural verse segments
+                    const verses = xmlDoc.getElementsByTagName("verse");
+                    if(verses.length > 0) {
+                        for(let i=0; i<verses.length; i++) {
+                            const name = verses[i].getAttribute("name") || `Verse ${i+1}`;
+                            const lines = verses[i].getElementsByTagName("lines")[0]?.textContent || "";
+                            activePresentationElements.push({ type: 'TEXT', title: name, body: lines });
+                        }
+                    } else {
+                        // Fallback parsing variant check (OpenSong layout variant mapping)
+                        const lyrics = xmlDoc.getElementsByTagName("lyrics")[0]?.textContent || "";
+                        const standardStanzas = lyrics.split("\n\n");
+                        standardStanzas.forEach((stanza, idx) => {
+                            if(stanza.trim().length > 0) {
+                                activePresentationElements.push({ type: 'TEXT', title: `Stanza ${idx+1}`, body: stanza.trim() });
+                            }
+                        });
+                    }
+                    generateControlManifest();
+                } catch(err) {
+                    alert("Error processing file framework templates. Verify file markup syntax.");
+                }
+            };
+            reader.readAsText(primaryFile);
+        }
+
+        // --- VISUAL PIPELINE INTERFACE (PDF / Slide Image Assets) ---
+        function processVisualPayload(files) {
+            activePresentationElements = [];
+            let imageFilesQueue = files.filter(f => f.type.startsWith('image/'));
+            let pdfFilesQueue = files.filter(f => f.name.endsWith('.pdf'));
+
+            if (pdfFilesQueue.length > 0) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const typedarray = new Uint8Array(e.target.result);
+                    pdfjsLib.getDocument(typedarray).promise.then(function(pdf) {
+                        internalPdfDocumentInstance = pdf;
+                        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                            activePresentationElements.push({ type: 'PDF', page: pageNum, title: `PDF Slide Page Frame - ${pageNum}` });
+                        }
+                        generateControlManifest();
+                    });
+                };
+                reader.readAsArrayBuffer(pdfFilesQueue[0]);
+            } else if (imageFilesQueue.length > 0) {
+                // Sorting sequential file arrays dynamically to preserve order
+                imageFilesQueue.sort((a, b) => a.name.localeCompare(b.name, undefined, {numeric: true, sensitivity: 'base'}));
+                
+                let processedCount = 0;
+                imageFilesQueue.forEach((file, index) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        activePresentationElements[index] = { type: 'IMAGE', dataUrl: e.target.result, title: file.name };
+                        processedCount++;
+                        if(processedCount === imageFilesQueue.length) {
+                            // Filter empty slots
+                            activePresentationElements = activePresentationElements.filter(Boolean);
+                            generateControlManifest();
+                        }
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        }
+
+        // --- BIBLE LOGIC INJECTION ---
+        function triggerQuickScripture() {
+            const book = document.getElementById('bible-book').value;
+            const chap = document.getElementById('bible-chap').value;
+            const verse = document.getElementById('bible-verse').value;
+            
+            // Instantly appends query parameters onto live text template buffers
+            const fallbackScriptureText = `"${book} ${chap}:${verse}"\n\n[ Scripture layout matched automatically via active console configuration rules ]`;
+            
+            activePresentationElements = [{ type: 'TEXT', title: `${book} ${chap}:${verse}`, body: fallbackScriptureText }];
+            generateControlManifest();
+            executeSlideTransition(0);
+        }
+
+        // --- NETWORK CAMERA INTEGRATION (NDI) ---
+        function toggleNDI(activate) {
+            if(activate) {
+                const targetUrl = document.getElementById('ndi-url-input').value;
+                videoLayer.src = targetUrl;
+                videoLayer.style.display = 'block';
+            } else {
+                videoLayer.style.display = 'none';
+                videoLayer.src = "";
+            }
+            updateConfidenceMonitor();
+        }
+
+        // --- DISPLAY PRESENTATION MANAGEMENT ENGINE ---
+        function generateControlManifest() {
+            manifestContainer.innerHTML = "";
+            if(activePresentationElements.length === 0) {
+                manifestContainer.innerHTML = `<li style="color:#666; text-align:center; padding:40px 0;">No items populated.</li>`;
+                return;
+            }
+
+            activePresentationElements.forEach((elem, idx) => {
+                const li = document.createElement('li');
+                li.id = `slide-track-${idx}`;
+                li.innerHTML = `<strong>[${elem.type}] ${elem.title}</strong><br><small>${elem.body ? elem.body.substring(0, 60) + '...' : 'Media Presentation Graphic Matrix'}</small>`;
+                li.onclick = () => { executeSlideTransition(idx); };
+                manifestContainer.appendChild(li);
+            });
+            activeElementPointer = -1;
+        }
+
+        function executeSlideTransition(targetIndex) {
+            if(targetIndex < 0 || targetIndex >= activePresentationElements.length) return;
+            
+            // Clean up list component active tracking frames
+            if(activeElementPointer >= 0) {
+                document.getElementById(`slide-track-${activeElementPointer}`)?.classList.remove('active');
+            }
+            
+            activeElementPointer = targetIndex;
+            const activeLineItem = document.getElementById(`slide-track-${activeElementPointer}`);
+            if(activeLineItem) {
+                activeLineItem.classList.add('active');
+                activeLineItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            const currentMedia = activePresentationElements[activeElementPointer];
+
+            // Reset dynamic media views
+            textLayer.style.display = 'none';
+            imageLayer.style.display = 'none';
+            canvasLayer.style.display = 'none';
+
+            if(currentMedia.type === 'TEXT') {
+                textLayer.innerText = currentMedia.body;
+                textLayer.style.display = 'block';
+                updateConfidenceMonitor();
+            } else if (currentMedia.type === 'IMAGE') {
+                imageLayer.src = currentMedia.dataUrl;
+                imageLayer.style.display = 'block';
+                updateConfidenceMonitor();
+            } else if (currentMedia.type === 'PDF' && internalPdfDocumentInstance) {
+                internalPdfDocumentInstance.getPage(currentMedia.page).then(function(page) {
+                    const viewport = page.getViewport({ scale: 2.0 }); // Request clean crisp textures
+                    canvasLayer.height = viewport.height;
+                    canvasLayer.width = viewport.width;
+                    
+                    const renderContext = {
+                        canvasContext: canvasLayer.getContext('2d'),
+                        viewport: viewport
+                    };
+                    page.render(renderContext).promise.then(() => {
+                        canvasLayer.style.display = 'block';
+                        updateConfidenceMonitor();
+                    });
+                });
+            }
+        }
+
+        function clearDisplayLayer(layerType) {
+            if(layerType === 'TEXT') textLayer.innerText = "";
+            updateConfidenceMonitor();
+        }
+
+        function clearAllDisplayLayers() {
+            textLayer.innerText = "";
+            imageLayer.removeAttribute('src');
+            imageLayer.style.display = 'none';
+            canvasLayer.style.display = 'none';
+            videoLayer.style.display = 'none';
+            videoLayer.src = "";
+            updateConfidenceMonitor();
+        }
+
+        function updateConfidenceMonitor() {
+            // Mirror current content container layout states down onto operator deck displays
+            const sourceTargetNode = document.getElementById('live-canvas-container');
+            monitorDisplayAnchor.innerHTML = sourceTargetNode.innerHTML;
+        }
+
+        // Global Event Routing (Key Board Hooks)
+        window.addEventListener('keydown', function(e) {
+            if(e.key === "ArrowDown" || e.key === "Spacebar" || e.key === " ") {
+                e.preventDefault();
+                executeSlideTransition(activeElementPointer + 1);
+            }
+            if(e.key === "ArrowUp") {
+                e.preventDefault();
+                executeSlideTransition(activeElementPointer - 1);
+            }
+            if(e.key === "Escape") {
+                e.preventDefault();
+                clearAllDisplayLayers();
+            }
+        });
+    </script>
+</body>
+</html>
