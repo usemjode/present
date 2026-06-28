@@ -26,6 +26,13 @@
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
         .video-tutorial-container { position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; border: 1px solid #444; }
+
+        /* POPUP CUSTOMIZATION MODAL */
+        .modal-overlay { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); display:none; justify-content:center; align-items:center; z-index:999; }
+        .modal-box { background: var(--panel); border: 2px solid var(--accent); padding: 25px; width: 500px; max-height: 85vh; border-radius: 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .modal-header { font-size: 1.2rem; font-weight: bold; border-bottom: 1px solid #444; padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center; }
+        .modal-close { cursor:pointer; color:#aaa; font-size:1.5rem; } .modal-close:hover { color:#fff; }
+        .verse-entry { background: #141419; padding: 10px; border-radius: 4px; display:flex; flex-direction:column; gap:6px; border-left: 3px solid #ffb703; }
     </style>
 </head>
 <body>
@@ -35,6 +42,7 @@
         <button onclick="launchProjectorWindow()" style="background:#4c956c; font-size: 1rem; padding: 12px;">Step 1: Launch External Projector Window</button>
         
         <div class="title">Media Ingestion</div>
+        <button onclick="openSongModal()" style="background:#ffb703; color:#121214; margin-bottom: 5px;">🎵 Create New Song</button>
         <div class="drop-zone" id="xml-drop">Drop XML (Hymnal / Song)</div>
         <div class="drop-zone" id="media-drop">Drop PDF or LibreOffice PNG Images</div>
 
@@ -67,7 +75,6 @@
                 <input type="number" id="b-chap" value="3" placeholder="Ch">
                 <input type="number" id="b-vs" value="16" placeholder="Vs">
             </div>
-            <!-- Custom scripture entry layout -->
             <label>Scripture Body Text Override</label>
             <textarea id="b-text" style="height:60px;" placeholder="Type or paste verse lines here..."></textarea>
             <button onclick="pushBibleScripture()" style="background:#3a86ff;">Format & Output Scripture</button>
@@ -146,6 +153,34 @@
         </div>
     </div>
 
+    <!-- SONG CREATOR & CUSTOMIZATION MODAL POPUP -->
+    <div class="modal-overlay" id="song-modal">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span>Song Customization Builder</span>
+                <span class="modal-close" onclick="closeSongModal()">&times;</span>
+            </div>
+            
+            <label>Song Title / Track Name</label>
+            <input type="text" id="modal-song-title" value="Amazing Grace">
+
+            <label>Slide Background Layer Asset (Image URL or DataUri)</label>
+            <input type="text" id="modal-song-bg" placeholder="Leave empty for clear/black, or paste an image URL/Base64">
+
+            <div class="title" style="border-bottom-color:#ffb703;">Song Verse Mapping</div>
+            <div id="modal-verses-container" style="display:flex; flex-direction:column; gap:10px;">
+                <!-- Dynamically populated stanza modules -->
+            </div>
+
+            <button type="button" onclick="addVerseToModal()" style="background:#2d2d3d; border:1px solid #444;">+ Add Next Verse / Stanza Element</button>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+                <button onclick="compileAndInjectSong()" style="background:#4c956c;">Apply to Screen</button>
+                <button onclick="exportSongToXML()" style="background:#3a86ff;">Download XML File</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         
@@ -156,13 +191,85 @@
         let activeHardwareStream = null;
         let checkingHardware = false;
 
-        // Force access permission then poll devices
+        // Customization Modal Logic
+        function openSongModal() {
+            document.getElementById('song-modal').style.display = 'flex';
+            const container = document.getElementById('modal-verses-container');
+            container.innerHTML = "";
+            addVerseToModal("Verse 1", "Amazing grace! How sweet the sound\nThat saved a wretch like me!");
+        }
+
+        function closeSongModal() {
+            document.getElementById('song-modal').style.display = 'none';
+        }
+
+        function addVerseToModal(vName = "", vContent = "") {
+            const container = document.getElementById('modal-verses-container');
+            const idx = container.children.length + 1;
+            const div = document.createElement('div');
+            div.className = 'verse-entry';
+            div.innerHTML = `
+                <div style="display:flex; gap:5px;">
+                    <input type="text" class="v-name" value="${vName || 'Verse ' + idx}" placeholder="Verse Identifier" style="width:40%;">
+                    <button onclick="this.parentElement.parentElement.remove()" style="background:#d90429; width:20%; margin:0; padding:4px;">Del</button>
+                </div>
+                <textarea class="v-text" placeholder="Type lyrics here..." style="height:55px;">${vContent}</textarea>
+            `;
+            container.appendChild(div);
+        }
+
+        // Apply dynamically constructed song asset structure onto current workflow run
+        function compileAndInjectSong() {
+            const title = document.getElementById('modal-song-title').value || "Custom Song Asset";
+            const bgUrl = document.getElementById('modal-song-bg').value;
+            const entryBlocks = document.querySelectorAll('.verse-entry');
+            
+            slideDeck = [];
+            entryBlocks.forEach(block => {
+                const name = block.querySelector('.v-name').value || "Verse";
+                const lines = block.querySelector('.v-text').value;
+                slideDeck.push({
+                    type: 'TEXT',
+                    title: `${title} (${name})`,
+                    body: lines,
+                    backgroundAsset: bgUrl || null
+                });
+            });
+
+            rebuildTimeline();
+            closeSongModal();
+            if(slideDeck.length > 0) changeSlide(0);
+        }
+
+        // Transform custom structure out into production ready downstream XML file asset
+        function exportSongToXML() {
+            const title = document.getElementById('modal-song-title').value || "Untitled_Song";
+            const bgUrl = document.getElementById('modal-song-bg').value;
+            const entryBlocks = document.querySelectorAll('.verse-entry');
+
+            let xmlString = `<?xml version="1.0" encoding="UTF-8"?>\n<song>\n  <title>${title}</title>\n  <background>${bgUrl || ""}</background>\n  <lyrics>\n`;
+            
+            entryBlocks.forEach(block => {
+                const name = block.querySelector('.v-name').value || "Verse";
+                const lines = block.querySelector('.v-text').value.replace(/\n/g, '<br/>');
+                xmlString += `    <verse name="${name}">\n      <lines>${lines}</lines>\n    </verse>\n`;
+            });
+
+            xmlString += `  </lyrics>\n</song>`;
+
+            const blob = new Blob([xmlString], { type: 'text/xml' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `${title.replace(/[^a-zA-Z0-9]/g, "_")}.xml`;
+            link.click();
+        }
+
         function requestCamPermissionOnce() {
             if(checkingHardware) return;
             checkingHardware = true;
             navigator.mediaDevices.getUserMedia({ video: true })
                 .then(stream => {
-                    stream.getTracks().forEach(track => track.stop()); // close temp stream immediately
+                    stream.getTracks().forEach(track => track.stop());
                     scanHardwareDevices();
                 }).catch(() => {
                     document.getElementById('webcam-selector').innerHTML = "<option value=''>Camera Access Denied by System</option>";
@@ -281,22 +388,27 @@
                 const xml = new DOMParser().parseFromString(e.target.result, "text/xml");
                 slideDeck = [];
                 
+                const sTitle = xml.getElementsByTagName("title")[0]?.textContent || "XML Track";
+                const sBg = xml.getElementsByTagName("background")[0]?.textContent || null;
                 const verses = xml.getElementsByTagName("verse");
+                
                 if(verses.length > 0) {
                     for(let i=0; i<verses.length; i++) {
                         slideDeck.push({
                             type: 'TEXT',
-                            title: verses[i].getAttribute("name") || `Slide ${i+1}`,
-                            body: verses[i].getElementsByTagName("lines")[0]?.textContent.replace(/<br\s*\/?>/gi, '\n') || ""
+                            title: `${sTitle} (${verses[i].getAttribute("name") || i+1})`,
+                            body: verses[i].getElementsByTagName("lines")[0]?.textContent.replace(/<br\s*\/?>/gi, '\n') || "",
+                            backgroundAsset: sBg
                         });
                     }
                 } else {
                     const lyrics = xml.getElementsByTagName("lyrics")[0]?.textContent || "";
                     lyrics.split("\n\n").forEach((st, i) => {
-                        if(st.trim()) slideDeck.push({ type: 'TEXT', title: `Stanza ${i+1}`, body: st.trim() });
+                        if(st.trim()) slideDeck.push({ type: 'TEXT', title: `${sTitle} (Stanza ${i+1})`, body: st.trim(), backgroundAsset: sBg });
                     });
                 }
                 rebuildTimeline();
+                if(slideDeck.length > 0) changeSlide(0);
             };
             reader.readAsText(files[0]);
         }
@@ -352,7 +464,7 @@
             
             const compiledText = `"${book} ${ch}:${vs}"\n\n${bodyTxt}`;
             
-            slideDeck = [{ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: compiledText }];
+            slideDeck = [{ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: compiledText, backgroundAsset: null }];
             rebuildTimeline();
             changeSlide(0);
         }
@@ -411,10 +523,22 @@
                 document.getElementById('prev-text').innerText = slide.body;
                 document.getElementById('prev-text').style.display = 'block';
                 
+                // Track & Render dedicated slide backgrounds if assigned
+                if(slide.backgroundAsset) {
+                    document.getElementById('prev-img').src = slide.backgroundAsset;
+                    document.getElementById('prev-img').style.display = 'block';
+                }
+
                 if (projWindow && !projWindow.closed) {
                     const pTxt = projWindow.document.getElementById('live-txt');
                     pTxt.innerText = slide.body;
                     pTxt.style.display = 'block';
+
+                    if(slide.backgroundAsset) {
+                        const pImg = projWindow.document.getElementById('live-img');
+                        pImg.src = slide.backgroundAsset;
+                        pImg.style.display = 'block';
+                    }
                 }
             } else {
                 document.getElementById('slide-editor-text').value = "[Visual Media Slide Selected - Non-Editable]";
