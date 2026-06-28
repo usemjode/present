@@ -31,7 +31,6 @@
         const viewPdf = document.getElementById('live-pdf');
         const viewport = document.getElementById('canvas-viewport');
 
-        // Request active state values immediately on mount instantiation routines
         airChannel.postMessage({ action: 'REQUEST_PDF_STREAM' });
 
         airChannel.onmessage = function(e) {
@@ -46,12 +45,10 @@
                     viewImg.src = d.url;
                     viewImg.style.display = 'block';
                 } else if(d.type === 'PDF') {
-                    // Ask the master operator handle to push document structures if needed 
-                    // or handle localized rendering tasks across window memory frames safely
                     if(window.opener && window.opener.localPdfRef) {
                         window.opener.localPdfRef.getPage(d.pageIndex).then(page => {
                             const ctx = viewPdf.getContext('2d');
-                            const vp = page.getViewport({ scale: 2.0 }); // High fidelity rasterization setting 
+                            const vp = page.getViewport({ scale: 2.0 }); 
                             viewPdf.height = vp.height; viewPdf.width = vp.width;
                             page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
                                 viewPdf.style.display = 'block';
