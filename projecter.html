@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Live Stream Output Canvas</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+        #canvas-viewport { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+        #live-txt { position: absolute; z-index: 3; width: 85%; color: #fff; font-size: 4.5rem; font-weight: bold; text-shadow: 3px 3px 8px rgba(0,0,0,0.9), -3px -3px 8px rgba(0,0,0,0.9); line-height: 1.3; white-space: pre-line; display: none; box-sizing: border-box; }
+        #live-img, #live-vid { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
+        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-viewport">
+        <img id="live-vid" src="" alt="Camera Overlay Feed Node">
+        <img id="live-img" src="" alt="System Projection Image Frame Layer">
+        <canvas id="live-pdf"></canvas>
+        <div id="live-txt"></div>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        
+        const airChannel = new BroadcastChannel('church_presentation_matrix');
+        const viewTxt = document.getElementById('live-txt');
+        const viewImg = document.getElementById('live-img');
+        const viewVid = document.getElementById('live-vid');
+        const viewPdf = document.getElementById('live-pdf');
+        const viewport = document.getElementById('canvas-viewport');
+
+        // Request active state values immediately on mount instantiation routines
+        airChannel.postMessage({ action: 'REQUEST_PDF_STREAM' });
+
+        airChannel.onmessage = function(e) {
+            const d = e.data;
+            
+            if(d.action === 'RENDER_SLIDE') {
+                resetLayers();
+                if(d.type === 'TEXT') {
+                    viewTxt.innerText = d.body;
+                    viewTxt.style.display = 'block';
+                } else if(d.type === 'IMAGE') {
+                    viewImg.src = d.url;
+                    viewImg.style.display = 'block';
+                } else if(d.type === 'PDF') {
+                    // Ask the master operator handle to push document structures if needed 
+                    // or handle localized rendering tasks across window memory frames safely
+                    if(window.opener && window.opener.localPdfRef) {
+                        window.opener.localPdfRef.getPage(d.pageIndex).then(page => {
+                            const ctx = viewPdf.getContext('2d');
+                            const vp = page.getViewport({ scale: 2.0 }); // High fidelity rasterization setting 
+                            viewPdf.height = vp.height; viewPdf.width = vp.width;
+                            page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
+                                viewPdf.style.display = 'block';
+                            });
+                        });
+                    }
+                }
+            }
+
+            if(d.action === 'UPDATE_STYLE') {
+                viewTxt.style.fontFamily = d.style.font;
+                viewTxt.style.fontSize = d.style.size + "rem";
+                viewTxt.style.textAlign = d.style.align;
+                viewport.style.alignItems = d.style.valign;
+                viewTxt.style.color = d.style.color;
+            }
+
+            if(d.action === 'SET_NDI') {
+                if(d.state) {
+                    viewVid.src = d.url;
+                    viewVid.style.display = 'block';
+                } else {
+                    viewVid.style.display = 'none';
+                    viewVid.src = "";
+                }
+            }
+
+            if(d.action === 'CLEAR') {
+                if(d.mode === 'TEXT') viewTxt.innerText = "";
+                if(d.mode === 'ALL') {
+                    viewTxt.innerText = "";
+                    viewImg.style.display = 'none'; viewImg.src = "";
+                    viewPdf.style.display = 'none';
+                    viewVid.style.display = 'none'; viewVid.src = "";
+                }
+            }
+        };
+
+        function resetLayers() {
+            viewTxt.style.display = 'none';
+            viewImg.style.display = 'none';
+            viewPdf.style.display = 'none';
+        }
+    </script>
+</body>
+</html>
