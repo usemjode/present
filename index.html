@@ -22,6 +22,7 @@
         #preview-canvas-frame { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; background: #000; }
         #prev-text { font-size: 1rem; color: #fff; text-align: center; z-index: 3; white-space: pre-line; font-weight: bold; padding: 10px; }
         #prev-img, #prev-video, #prev-webcam { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
+        #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
         .video-tutorial-container { position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; border: 1px solid #444; }
@@ -40,8 +41,8 @@
         <div class="title">Hardware & Local Webcams</div>
         <div class="control-group">
             <label>Select Local Device Capture Source</label>
-            <select id="webcam-selector">
-                <option value="">-- Scanning for Input Hardware... --</option>
+            <select id="webcam-selector" onclick="requestCamPermissionOnce()">
+                <option value="">-- Click to Scan Hardware Input Devices --</option>
             </select>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
                 <button onclick="startHardwareCamera()" style="background:#ffb703; color:#121214;">Start Camera</button>
@@ -66,7 +67,10 @@
                 <input type="number" id="b-chap" value="3" placeholder="Ch">
                 <input type="number" id="b-vs" value="16" placeholder="Vs">
             </div>
-            <button onclick="pushBibleScripture()">Format & Output Scripture</button>
+            <!-- Custom scripture entry layout -->
+            <label>Scripture Body Text Override</label>
+            <textarea id="b-text" style="height:60px;" placeholder="Type or paste verse lines here..."></textarea>
+            <button onclick="pushBibleScripture()" style="background:#3a86ff;">Format & Output Scripture</button>
         </div>
     </div>
 
@@ -79,6 +83,7 @@
 
         <div class="title">Presentation Active Workspace</div>
         
+        <!-- Live Slide Content Editor -->
         <div class="control-group" id="editor-workspace">
             <label style="font-weight: bold; color: var(--accent);">Live Slide Content Editor</label>
             <textarea id="slide-editor-text" placeholder="Select a text slide below to live-edit its content here..." oninput="updateActiveSlideContent()"></textarea>
@@ -98,8 +103,7 @@
                 <video id="prev-webcam" autoplay playsinline muted></video>
                 <img id="prev-video" src="">
                 <img id="prev-img" src="">
-                <!-- Hidden background converter canvas -->
-                <canvas id="hidden-pdf-canvas" style="display: none;"></canvas>
+                <canvas id="prev-pdf"></canvas>
                 <div id="prev-text"></div>
             </div>
         </div>
@@ -150,26 +154,41 @@
         let localPdfRef = null;
         let projWindow = null;
         let activeHardwareStream = null;
+        let checkingHardware = false;
 
-        navigator.mediaDevices?.enumerateDevices()
-            .then(devices => {
-                const selector = document.getElementById('webcam-selector');
-                selector.innerHTML = "";
-                const videoInputs = devices.filter(device => device.kind === 'videoinput');
-                
-                if(videoInputs.length === 0) {
-                    selector.innerHTML = "<option value=''>No local cameras found</option>";
-                    return;
-                }
-                videoInputs.forEach((device, index) => {
-                    const opt = document.createElement('option');
-                    opt.value = device.deviceId;
-                    opt.text = device.label || `Local Camera/Capture Card ${index + 1}`;
-                    selector.appendChild(opt);
+        // Force access permission then poll devices
+        function requestCamPermissionOnce() {
+            if(checkingHardware) return;
+            checkingHardware = true;
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    stream.getTracks().forEach(track => track.stop()); // close temp stream immediately
+                    scanHardwareDevices();
+                }).catch(() => {
+                    document.getElementById('webcam-selector').innerHTML = "<option value=''>Camera Access Denied by System</option>";
+                    checkingHardware = false;
                 });
-            }).catch(() => {
-                document.getElementById('webcam-selector').innerHTML = "<option value=''>Camera Permissions Denied</option>";
-            });
+        }
+
+        function scanHardwareDevices() {
+            navigator.mediaDevices.enumerateDevices()
+                .then(devices => {
+                    const selector = document.getElementById('webcam-selector');
+                    selector.innerHTML = "";
+                    const videoInputs = devices.filter(device => device.kind === 'videoinput');
+                    
+                    if(videoInputs.length === 0) {
+                        selector.innerHTML = "<option value=''>No local hardware cameras found</option>";
+                        return;
+                    }
+                    videoInputs.forEach((device, index) => {
+                        const opt = document.createElement('option');
+                        opt.value = device.deviceId;
+                        opt.text = device.label || `Camera Hardware Device ${index + 1}`;
+                        selector.appendChild(opt);
+                    });
+                });
+        }
 
         function launchProjectorWindow() {
             projWindow = window.open('', 'ProjectorScreen', 'width=1280,height=720');
@@ -188,6 +207,7 @@
                             white-space: pre-line; display: none; box-sizing: border-box; font-family: inherit; text-align: center;
                         }
                         #live-img, #live-vid, #live-webcam { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
+                        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
                     </style>
                 </head>
                 <body>
@@ -195,6 +215,7 @@
                         <video id="live-webcam" autoplay playsinline></video>
                         <img id="live-vid" src="">
                         <img id="live-img" src="">
+                        <canvas id="live-pdf"></canvas>
                         <div id="live-txt"></div>
                     </div>
                 </body>
@@ -208,10 +229,12 @@
             stopHardwareCamera();
             const deviceId = document.getElementById('webcam-selector').value;
             if(!deviceId) return;
-            const constraints = { video: { deviceId: { exact: deviceId }, width: 1920, height: 1080 } };
+
+            const constraints = { video: { deviceId: { exact: deviceId } } };
             
             navigator.mediaDevices.getUserMedia(constraints).then(stream => {
                 activeHardwareStream = stream;
+                
                 const pCam = document.getElementById('prev-webcam');
                 pCam.srcObject = stream;
                 pCam.style.display = 'block';
@@ -221,7 +244,7 @@
                     lCam.srcObject = stream;
                     lCam.style.display = 'block';
                 }
-            }).catch(err => alert("Could not open hardware video layer: " + err.message));
+            }).catch(err => alert("Video Capture Error: " + err.message));
         }
 
         function stopHardwareCamera() {
@@ -257,6 +280,7 @@
             reader.onload = function(e) {
                 const xml = new DOMParser().parseFromString(e.target.result, "text/xml");
                 slideDeck = [];
+                
                 const verses = xml.getElementsByTagName("verse");
                 if(verses.length > 0) {
                     for(let i=0; i<verses.length; i++) {
@@ -324,8 +348,11 @@
             const book = document.getElementById('b-book').value;
             const ch = document.getElementById('b-chap').value;
             const vs = document.getElementById('b-vs').value;
-            const text = `"${book} ${ch}:${vs}"\n\nFor God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.`;
-            slideDeck = [{ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: text }];
+            const bodyTxt = document.getElementById('b-text').value || "...No verse text entered...";
+            
+            const compiledText = `"${book} ${ch}:${vs}"\n\n${bodyTxt}`;
+            
+            slideDeck = [{ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: compiledText }];
             rebuildTimeline();
             changeSlide(0);
         }
@@ -370,10 +397,12 @@
             
             document.getElementById('prev-text').style.display = 'none';
             document.getElementById('prev-img').style.display = 'none';
+            document.getElementById('prev-pdf').style.display = 'none';
             
             if (projWindow && !projWindow.closed) {
                 projWindow.document.getElementById('live-txt').style.display = 'none';
                 projWindow.document.getElementById('live-img').style.display = 'none';
+                projWindow.document.getElementById('live-pdf').style.display = 'none';
             }
 
             if(slide.type === 'TEXT') {
@@ -401,28 +430,24 @@
                         pImg.style.display = 'block';
                     }
                 } else if (slide.type === 'PDF' && localPdfRef) {
-                    // Turn PDF page directly into a standard cross-window flat image string
                     localPdfRef.getPage(slide.page).then(page => {
-                        const canvas = document.getElementById('hidden-pdf-canvas');
+                        const canvas = document.getElementById('prev-pdf');
                         const ctx = canvas.getContext('2d');
-                        const vp = page.getViewport({ scale: 2.0 }); // High-def render factor
-                        
-                        canvas.height = vp.height; 
-                        canvas.width = vp.width;
-                        
+                        const vp = page.getViewport({ scale: 0.5 });
+                        canvas.height = vp.height; canvas.width = vp.width;
                         page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
-                            const imgDataUrl = canvas.toDataURL('image/png');
-                            
-                            // Load as clean static image data across both views
-                            document.getElementById('prev-img').src = imgDataUrl;
-                            document.getElementById('prev-img').style.display = 'block';
-                            
-                            if (projWindow && !projWindow.closed) {
-                                const pImg = projWindow.document.getElementById('live-img');
-                                pImg.src = imgDataUrl;
-                                pImg.style.display = 'block';
-                            }
+                            canvas.style.display = 'block';
                         });
+
+                        if (projWindow && !projWindow.closed) {
+                            const pCanvas = projWindow.document.getElementById('live-pdf');
+                            const pCtx = pCanvas.getContext('2d');
+                            const pVp = page.getViewport({ scale: 2.0 });
+                            pCanvas.height = pVp.height; pCanvas.width = pVp.width;
+                            page.render({ canvasContext: pCtx, viewport: pVp }).promise.then(() => {
+                                pCanvas.style.display = 'block';
+                            });
+                        }
                     });
                 }
             }
@@ -461,6 +486,7 @@
             document.getElementById('prev-text').innerText = "";
             if(mode === 'ALL') {
                 document.getElementById('prev-img').style.display = 'none';
+                document.getElementById('prev-pdf').style.display = 'none';
                 document.getElementById('prev-video').style.display = 'none';
                 stopHardwareCamera();
             }
@@ -469,6 +495,7 @@
                 projWindow.document.getElementById('live-txt').innerText = "";
                 if(mode === 'ALL') {
                     projWindow.document.getElementById('live-img').style.display = 'none';
+                    projWindow.document.getElementById('live-pdf').style.display = 'none';
                     projWindow.document.getElementById('live-vid').style.display = 'none';
                 }
             }
