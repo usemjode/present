@@ -25,14 +25,12 @@
         #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
-        .tab-btn { background: #2a2a35; border: 1px solid #444; padding: 6px; font-size: 0.8rem; }
-        .tab-btn.active { background: var(--accent); }
     </style>
 </head>
 <body>
 
     <div class="panel">
-        <button onclick="launchProjectorWindow()" style="background:#4c956c; font-size: 1rem; padding: 12px;">Step 1: Open Projector Window</button>
+        <button onclick="launchProjectorWindow()" style="background:#4c956c; font-size: 1rem; padding: 12px;">Step 1: Launch External Projector Window</button>
         
         <div class="title">Media Ingestion</div>
         <div class="drop-zone" id="xml-drop">Drop XML (Hymnal / Song)</div>
@@ -136,14 +134,40 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         
-        const airChannel = new BroadcastChannel('church_presentation_matrix');
         let slideDeck = [];
         let activeIndex = -1;
         let localPdfRef = null;
-        let projectorWindowHandle = null;
+        let projWindow = null; // Direct object link to sub-window
 
+        // Inject projector document structure dynamically to handle file permissions instantly
         function launchProjectorWindow() {
-            projectorWindowHandle = window.open('projector.html', 'ProjectorScreen', 'width=1280,height=720,dependencies=yes');
+            projWindow = window.open('', 'ProjectorScreen', 'width=1280,height=720');
+            projWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Live Stream Output Canvas</title>
+                    <style>
+                        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+                        #canvas-viewport { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+                        #live-txt { position: absolute; z-index: 3; width: 85%; color: #fff; font-size: 4.5rem; font-weight: bold; text-shadow: 3px 3px 8px rgba(0,0,0,0.9), -3px -3px 8px rgba(0,0,0,0.9); line-height: 1.3; white-space: pre-line; display: none; box-sizing: border-box; }
+                        #live-img, #live-vid { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
+                        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
+                    </style>
+                </head>
+                <body>
+                    <div id="canvas-viewport">
+                        <img id="live-vid" src="">
+                        <img id="live-img" src="">
+                        <canvas id="live-pdf"></canvas>
+                        <div id="live-txt"></div>
+                    </div>
+                </body>
+                </html>
+            `);
+            projWindow.document.close();
+            // Push active styles down immediately
+            setTimeout(applyLiveStyle, 200);
         }
 
         setupDrop('xml-drop', handleXml);
@@ -219,14 +243,14 @@
             if (activeIndex < 0 || slideDeck[activeIndex].type !== 'TEXT') return;
             const updatedText = document.getElementById('slide-editor-text').value;
             
-            // Modify database instance locally
             slideDeck[activeIndex].body = updatedText;
-            
-            // Re-render display layers seamlessly
             document.getElementById(`item-${activeIndex}`).querySelector('small').innerText = updatedText.substring(0, 50) + '...';
             
             document.getElementById('prev-text').innerText = updatedText;
-            airChannel.postMessage({ action: 'RENDER_SLIDE', type: 'TEXT', body: updatedText });
+            
+            if (projWindow && !projWindow.closed) {
+                projWindow.document.getElementById('live-txt').innerText = updatedText;
+            }
         }
 
         function pushBibleScripture() {
@@ -243,7 +267,12 @@
             const url = state ? document.getElementById('ndi-url').value : "";
             document.getElementById('prev-video').src = url;
             document.getElementById('prev-video').style.display = state ? 'block' : 'none';
-            airChannel.postMessage({ action: 'SET_NDI', url: url, state: state });
+            
+            if (projWindow && !projWindow.closed) {
+                const targetVid = projWindow.document.getElementById('live-vid');
+                targetVid.src = url;
+                targetVid.style.display = state ? 'block' : 'none';
+            }
         }
 
         function rebuildTimeline() {
@@ -272,11 +301,16 @@
 
             const slide = slideDeck[activeIndex];
             
+            // Clear current states
             document.getElementById('prev-text').style.display = 'none';
             document.getElementById('prev-img').style.display = 'none';
             document.getElementById('prev-pdf').style.display = 'none';
-
-            let packet = { action: 'RENDER_SLIDE', type: slide.type };
+            
+            if (projWindow && !projWindow.closed) {
+                projWindow.document.getElementById('live-txt').style.display = 'none';
+                projWindow.document.getElementById('live-img').style.display = 'none';
+                projWindow.document.getElementById('live-pdf').style.display = 'none';
+            }
 
             if(slide.type === 'TEXT') {
                 document.getElementById('slide-editor-text').value = slide.body;
@@ -284,8 +318,12 @@
                 
                 document.getElementById('prev-text').innerText = slide.body;
                 document.getElementById('prev-text').style.display = 'block';
-                packet.body = slide.body;
-                airChannel.postMessage(packet);
+                
+                if (projWindow && !projWindow.closed) {
+                    const pTxt = projWindow.document.getElementById('live-txt');
+                    pTxt.innerText = slide.body;
+                    pTxt.style.display = 'block';
+                }
             } else {
                 document.getElementById('slide-editor-text').value = "[Visual Media Slide Selected - Non-Editable]";
                 document.getElementById('slide-editor-text').disabled = true;
@@ -293,9 +331,14 @@
                 if (slide.type === 'IMAGE') {
                     document.getElementById('prev-img').src = slide.url;
                     document.getElementById('prev-img').style.display = 'block';
-                    packet.url = slide.url;
-                    airChannel.postMessage(packet);
+                    
+                    if (projWindow && !projWindow.closed) {
+                        const pImg = projWindow.document.getElementById('live-img');
+                        pImg.src = slide.url;
+                        pImg.style.display = 'block';
+                    }
                 } else if (slide.type === 'PDF' && localPdfRef) {
+                    // Render control view preview frame
                     localPdfRef.getPage(slide.page).then(page => {
                         const canvas = document.getElementById('prev-pdf');
                         const ctx = canvas.getContext('2d');
@@ -304,9 +347,18 @@
                         page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
                             canvas.style.display = 'block';
                         });
+
+                        // Instantly render matching high resolution context to projector window frame
+                        if (projWindow && !projWindow.closed) {
+                            const pCanvas = projWindow.document.getElementById('live-pdf');
+                            const pCtx = pCanvas.getContext('2d');
+                            const pVp = page.getViewport({ scale: 2.0 });
+                            pCanvas.height = pVp.height; pCanvas.width = pVp.width;
+                            page.render({ canvasContext: pCtx, viewport: pVp }).promise.then(() => {
+                                pCanvas.style.display = 'block';
+                            });
+                        }
                     });
-                    packet.pageIndex = slide.page;
-                    airChannel.postMessage(packet);
                 }
             }
             applyLiveStyle();
@@ -329,18 +381,33 @@
             frame.style.alignItems = style.valign;
             pt.style.color = style.color;
 
-            airChannel.postMessage({ action: 'UPDATE_STYLE', style: style });
+            if (projWindow && !projWindow.closed) {
+                const pTxt = projWindow.document.getElementById('live-txt');
+                const pViewport = projWindow.document.getElementById('canvas-viewport');
+                pTxt.style.fontFamily = style.font;
+                pTxt.style.fontSize = style.size + "rem";
+                pTxt.style.textAlign = style.align;
+                pViewport.style.alignItems = style.valign;
+                pTxt.style.color = style.color;
+            }
         }
 
         function emergencyClear(mode) {
-            if(mode === 'TEXT') document.getElementById('prev-text').innerText = "";
+            document.getElementById('prev-text').innerText = "";
             if(mode === 'ALL') {
-                document.getElementById('prev-text').innerText = "";
                 document.getElementById('prev-img').style.display = 'none';
                 document.getElementById('prev-pdf').style.display = 'none';
                 document.getElementById('prev-video').style.display = 'none';
             }
-            airChannel.postMessage({ action: 'CLEAR', mode: mode });
+
+            if (projWindow && !projWindow.closed) {
+                projWindow.document.getElementById('live-txt').innerText = "";
+                if(mode === 'ALL') {
+                    projWindow.document.getElementById('live-img').style.display = 'none';
+                    projWindow.document.getElementById('live-pdf').style.display = 'none';
+                    projWindow.document.getElementById('live-vid').style.display = 'none';
+                }
+            }
         }
 
         window.addEventListener('keydown', (e) => {
@@ -349,14 +416,6 @@
             if(e.key === "ArrowUp") { e.preventDefault(); changeSlide(activeIndex - 1); }
             if(e.key === "Escape") { e.preventDefault(); emergencyClear('ALL'); }
         });
-
-        airChannel.onmessage = function(e) {
-            if(e.data.action === 'REQUEST_PDF_STREAM' && localPdfRef) {
-                if(activeIndex >= 0 && slideDeck[activeIndex].type === 'PDF') {
-                    airChannel.postMessage({ action: 'RENDER_SLIDE', type: 'PDF', pageIndex: slideDeck[activeIndex].page });
-                }
-            }
-        };
     </script>
 </body>
 </html>
