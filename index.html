@@ -7,22 +7,32 @@
     <style>
         :root { --bg: #141419; --panel: #1e1e24; --accent: #3a86ff; --text: #f8f9fa; }
         body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; display: grid; grid-template-columns: 340px 1fr 360px; height: 100vh; overflow: hidden; }
-        .panel { background: var(--panel); border-right: 1px solid #2d2d35; padding: 15px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; box-sizing: border-box; }
-        .title { font-size: 0.95rem; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid var(--accent); padding-bottom: 4px; color: #aaa; }
+        .panel { background: var(--panel); border-right: 1px solid #2d2d35; padding: 15px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; box-sizing: border-box; height: 100vh; }
+        .title { font-size: 0.95rem; font-weight: bold; text-transform: uppercase; border-bottom: 2px solid var(--accent); padding-bottom: 4px; color: #aaa; margin-top: 5px; }
         .drop-zone { border: 2px dashed #444; padding: 15px; text-align: center; cursor: pointer; background: #18181c; border-radius: 6px; font-size: 0.85rem; }
         .drop-zone:hover { border-color: var(--accent); }
-        .item-list { list-style: none; padding: 0; margin: 0; }
-        .item-list li { background: #26262f; padding: 10px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; border-left: 4px solid transparent; }
+        
+        /* DRAG AND DROP TIMELINE STYLES */
+        .item-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+        .item-list li { background: #26262f; padding: 10px; border-radius: 4px; cursor: grab; font-size: 0.85rem; border-left: 4px solid transparent; transition: transform 0.15s ease; position: relative; }
+        .item-list li:active { cursor: grabbing; }
         .item-list li.active { border-left-color: var(--accent); background: #2d2d3d; }
+        .item-list li.dragging { opacity: 0.5; background: #3a86ff33; transform: scale(0.98); }
+        .delete-btn { position: absolute; right: 8px; top: 8px; background: #d90429; color: #fff; border: none; width: 20px; height: 20px; border-radius: 5px; font-size: 0.75rem; cursor: pointer; display: none; padding: 0; }
+        .item-list li:hover .delete-btn { display: block; }
+
         input, select, button, textarea { width: 100%; padding: 8px; background: #141419; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem; }
         textarea { resize: none; font-family: inherit; height: 80px; }
         button { background: var(--accent); font-weight: bold; border: none; cursor: pointer; margin-top: 5px; }
         button:hover { opacity: 0.9; }
+        
         .preview-container { background: #000; aspect-ratio: 16/9; width: 100%; border: 1px solid #333; position: relative; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         #preview-canvas-frame { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; background: #000; }
-        #prev-text { font-size: 1rem; color: #fff; text-align: center; z-index: 3; white-space: pre-line; font-weight: bold; padding: 10px; }
-        #prev-img, #prev-video, #prev-webcam { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
+        #prev-text { font-size: 1rem; color: #fff; text-align: center; z-index: 3; white-space: pre-line; font-weight: bold; padding: 10px; transition: opacity 0.3s ease; }
+        #prev-img, #prev-video, #prev-webcam, #prev-bg-video { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
+        #prev-bg-video { z-index: 0; }
         #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
+        
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
         .video-tutorial-container { position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; border: 1px solid #444; }
@@ -33,18 +43,22 @@
         .modal-header { font-size: 1.2rem; font-weight: bold; border-bottom: 1px solid #444; padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center; }
         .modal-close { cursor:pointer; color:#aaa; font-size:1.5rem; } .modal-close:hover { color:#fff; }
         .verse-entry { background: #141419; padding: 10px; border-radius: 4px; display:flex; flex-direction:column; gap:6px; border-left: 3px solid #ffb703; }
+        
+        /* QUICK-SAVE HISTORY LIST */
+        .history-list { display: flex; flex-direction: column; gap: 4px; max-height: 120px; overflow-y: auto; padding: 0; margin: 0; list-style: none; }
+        .history-list li { background: #1e1e24; padding: 6px 10px; font-size: 0.8rem; border-radius: 4px; cursor: pointer; border-left: 2px solid #666; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
+        .history-list li:hover { background: #26262f; border-left-color: var(--accent); }
     </style>
 </head>
 <body>
 
-    <!-- LEFT PANEL: CONFIGURATION, MEDIA, & CAMERA CONTROLS -->
     <div class="panel">
         <button onclick="launchProjectorWindow()" style="background:#4c956c; font-size: 1rem; padding: 12px;">Step 1: Launch External Projector Window</button>
         
         <div class="title">Media Ingestion</div>
         <button onclick="openSongModal()" style="background:#ffb703; color:#121214; margin-bottom: 5px;">🎵 Create New Song</button>
         <div class="drop-zone" id="xml-drop">Drop XML (Hymnal / Song)</div>
-        <div class="drop-zone" id="media-drop">Drop PDF or LibreOffice PNG Images</div>
+        <div class="drop-zone" id="media-drop">Drop PDF or Images / Video Loop Backgrounds</div>
 
         <div class="title">Hardware & Local Webcams</div>
         <div class="control-group">
@@ -68,20 +82,19 @@
             </div>
         </div>
 
-        <div class="title">Bible Engine Routing</div>
+        <div class="title">Bible Engine Library Routing</div>
         <div class="control-group">
             <div style="display:grid; grid-template-columns:2fr 1fr 1fr; gap:4px;">
-                <input type="text" id="b-book" value="John" placeholder="Book">
-                <input type="number" id="b-chap" value="3" placeholder="Ch">
-                <input type="number" id="b-vs" value="16" placeholder="Vs">
+                <input type="text" id="b-book" value="John" placeholder="Book" oninput="autoSearchBible()">
+                <input type="number" id="b-chap" value="3" placeholder="Ch" oninput="autoSearchBible()">
+                <input type="number" id="b-vs" value="16" placeholder="Vs" oninput="autoSearchBible()">
             </div>
-            <label>Scripture Body Text Override</label>
-            <textarea id="b-text" style="height:60px;" placeholder="Type or paste verse lines here..."></textarea>
+            <label>Scripture Body Text (Auto-Populates / Custom Override)</label>
+            <textarea id="b-text" style="height:60px;" placeholder="Type or use auto-library lookup..."></textarea>
             <button onclick="pushBibleScripture()" style="background:#3a86ff;">Format & Output Scripture</button>
         </div>
     </div>
 
-    <!-- MIDDLE PANEL: WORKSPACE, VIDEO TUTORIAL, & SEQUENCE -->
     <div class="panel" style="background: #17171c;">
         <div class="title">System Help & Tutorial Documentation</div>
         <div class="video-tutorial-container">
@@ -90,23 +103,22 @@
 
         <div class="title">Presentation Active Workspace</div>
         
-        <!-- Live Slide Content Editor -->
         <div class="control-group" id="editor-workspace">
             <label style="font-weight: bold; color: var(--accent);">Live Slide Content Editor</label>
             <textarea id="slide-editor-text" placeholder="Select a text slide below to live-edit its content here..." oninput="updateActiveSlideContent()"></textarea>
         </div>
 
-        <div class="title">Active Sequence Timeline</div>
+        <div class="title">Active Sequence Timeline (Drag to Reorder)</div>
         <ul class="item-list" id="timeline">
             <li style="color:#666; text-align:center; padding:40px 0;">Timeline empty. Ingest presentation sources via the configuration module.</li>
         </ul>
     </div>
 
-    <!-- RIGHT PANEL: CUSTOMIZATION ENGINE & PREVIEW -->
     <div class="panel" style="border-right:none; border-left:1px solid #2d2d35;">
         <div class="title">Live Confidence Monitor</div>
         <div class="preview-container">
             <div id="preview-canvas-frame">
+                <video id="prev-bg-video" autoplay loop muted playsinline></video>
                 <video id="prev-webcam" autoplay playsinline muted></video>
                 <img id="prev-video" src="">
                 <img id="prev-img" src="">
@@ -146,6 +158,13 @@
             <input type="color" id="cfg-color" value="#ffffff" onchange="applyLiveStyle()">
         </div>
 
+        <div class="title">Quick-Save History Sidebar</div>
+        <div class="control-group">
+            <ul class="history-list" id="history-sidebar">
+                <li style="color:#666; font-style:italic; border-left:none;">No quick-saves cached yet...</li>
+            </ul>
+        </div>
+
         <div class="title">Emergency Deck</div>
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
             <button style="background:#4a5759;" onclick="emergencyClear('TEXT')">Clear Text Only</button>
@@ -153,7 +172,6 @@
         </div>
     </div>
 
-    <!-- SONG CREATOR & CUSTOMIZATION MODAL POPUP -->
     <div class="modal-overlay" id="song-modal">
         <div class="modal-box">
             <div class="modal-header">
@@ -164,13 +182,11 @@
             <label>Song Title / Track Name</label>
             <input type="text" id="modal-song-title" value="Amazing Grace">
 
-            <label>Slide Background Layer Asset (Image URL or DataUri)</label>
-            <input type="text" id="modal-song-bg" placeholder="Leave empty for clear/black, or paste an image URL/Base64">
+            <label>Slide Background Layer Asset (Image/Video URL or DataUri)</label>
+            <input type="text" id="modal-song-bg" placeholder="Leave empty, or paste an image/video URL (.mp4)">
 
             <div class="title" style="border-bottom-color:#ffb703;">Song Verse Mapping</div>
-            <div id="modal-verses-container" style="display:flex; flex-direction:column; gap:10px;">
-                <!-- Dynamically populated stanza modules -->
-            </div>
+            <div id="modal-verses-container" style="display:flex; flex-direction:column; gap:10px;"></div>
 
             <button type="button" onclick="addVerseToModal()" style="background:#2d2d3d; border:1px solid #444;">+ Add Next Verse / Stanza Element</button>
             
@@ -190,8 +206,37 @@
         let projWindow = null;
         let activeHardwareStream = null;
         let checkingHardware = false;
+        let quickSaveHistory = [];
 
-        // Customization Modal Logic
+        // MINI INTERNAL BIBLE DATABASE (KJV Light Reference Library)
+        const localBibleDB = {
+            "john": {
+                "3": { "16": "For God so loved the world, that he gave his only begotten Son, that whosoever believeth in him should not perish, but have everlasting life.", "17": "For God sent not his Son into the world to condemn the world; but that the world through him might be saved." }
+            },
+            "genesis": {
+                "1": { "1": "In the beginning God created the heaven and the earth.", "3": "And God said, Let there be light: and there was light." }
+            },
+            "psalms": {
+                "23": { "1": "The LORD is my shepherd; I shall not want.", "2": "He maketh me to lie down in green pastures: he leadeth me beside the still waters." }
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', () => {
+            loadFromLocalStorage();
+            setupDragAndDropTimeline();
+        });
+
+        function autoSearchBible() {
+            const bk = document.getElementById('b-book').value.trim().toLowerCase();
+            const ch = document.getElementById('b-chap').value.trim();
+            const vs = document.getElementById('b-vs').value.trim();
+            
+            if (localBibleDB[bk] && localBibleDB[bk][ch] && localBibleDB[bk][ch][vs]) {
+                document.getElementById('b-text').value = localBibleDB[bk][ch][vs];
+            }
+        }
+
+        // POPUP SONG MODAL DESIGN CORE
         function openSongModal() {
             document.getElementById('song-modal').style.display = 'flex';
             const container = document.getElementById('modal-verses-container');
@@ -199,9 +244,7 @@
             addVerseToModal("Verse 1", "Amazing grace! How sweet the sound\nThat saved a wretch like me!");
         }
 
-        function closeSongModal() {
-            document.getElementById('song-modal').style.display = 'none';
-        }
+        function closeSongModal() { document.getElementById('song-modal').style.display = 'none'; }
 
         function addVerseToModal(vName = "", vContent = "") {
             const container = document.getElementById('modal-verses-container');
@@ -210,21 +253,19 @@
             div.className = 'verse-entry';
             div.innerHTML = `
                 <div style="display:flex; gap:5px;">
-                    <input type="text" class="v-name" value="${vName || 'Verse ' + idx}" placeholder="Verse Identifier" style="width:40%;">
+                    <input type="text" class="v-name" value="${vName || 'Verse ' + idx}" style="width:40%;">
                     <button onclick="this.parentElement.parentElement.remove()" style="background:#d90429; width:20%; margin:0; padding:4px;">Del</button>
                 </div>
-                <textarea class="v-text" placeholder="Type lyrics here..." style="height:55px;">${vContent}</textarea>
+                <textarea class="v-text" placeholder="Lyrics..." style="height:55px;">${vContent}</textarea>
             `;
             container.appendChild(div);
         }
 
-        // Apply dynamically constructed song asset structure onto current workflow run
         function compileAndInjectSong() {
             const title = document.getElementById('modal-song-title').value || "Custom Song Asset";
             const bgUrl = document.getElementById('modal-song-bg').value;
             const entryBlocks = document.querySelectorAll('.verse-entry');
             
-            slideDeck = [];
             entryBlocks.forEach(block => {
                 const name = block.querySelector('.v-name').value || "Verse";
                 const lines = block.querySelector('.v-text').value;
@@ -236,25 +277,24 @@
                 });
             });
 
+            addToHistory(title, "SONG");
             rebuildTimeline();
+            saveToLocalStorage();
             closeSongModal();
-            if(slideDeck.length > 0) changeSlide(0);
+            if(slideDeck.length > 0) changeSlide(slideDeck.length - 1);
         }
 
-        // Transform custom structure out into production ready downstream XML file asset
         function exportSongToXML() {
             const title = document.getElementById('modal-song-title').value || "Untitled_Song";
             const bgUrl = document.getElementById('modal-song-bg').value;
             const entryBlocks = document.querySelectorAll('.verse-entry');
 
             let xmlString = `<?xml version="1.0" encoding="UTF-8"?>\n<song>\n  <title>${title}</title>\n  <background>${bgUrl || ""}</background>\n  <lyrics>\n`;
-            
             entryBlocks.forEach(block => {
                 const name = block.querySelector('.v-name').value || "Verse";
                 const lines = block.querySelector('.v-text').value.replace(/\n/g, '<br/>');
                 xmlString += `    <verse name="${name}">\n      <lines>${lines}</lines>\n    </verse>\n`;
             });
-
             xmlString += `  </lyrics>\n</song>`;
 
             const blob = new Blob([xmlString], { type: 'text/xml' });
@@ -264,6 +304,34 @@
             link.click();
         }
 
+        // QUICK-SAVE HISTORY ENGINE
+        function addToHistory(label, type) {
+            quickSaveHistory = quickSaveHistory.filter(item => item.label !== label);
+            quickSaveHistory.unshift({ label, type, timestamp: Date.now(), currentDeckState: [...slideDeck] });
+            if(quickSaveHistory.length > 10) quickSaveHistory.pop();
+            renderHistorySidebar();
+        }
+
+        function renderHistorySidebar() {
+            const container = document.getElementById('history-sidebar');
+            if(quickSaveHistory.length === 0) {
+                container.innerHTML = `<li style="color:#666; font-style:italic; border-left:none;">No quick-saves cached yet...</li>`;
+                return;
+            }
+            container.innerHTML = "";
+            quickSaveHistory.forEach((item, idx) => {
+                const li = document.createElement('li');
+                li.innerText = `[${item.type}] ${item.label}`;
+                li.onclick = () => {
+                    slideDeck = [...item.currentDeckState];
+                    rebuildTimeline();
+                    changeSlide(0);
+                };
+                container.appendChild(li);
+            });
+        }
+
+        // NATIVE HARDWARE DISCOVERY
         function requestCamPermissionOnce() {
             if(checkingHardware) return;
             checkingHardware = true;
@@ -278,23 +346,21 @@
         }
 
         function scanHardwareDevices() {
-            navigator.mediaDevices.enumerateDevices()
-                .then(devices => {
-                    const selector = document.getElementById('webcam-selector');
-                    selector.innerHTML = "";
-                    const videoInputs = devices.filter(device => device.kind === 'videoinput');
-                    
-                    if(videoInputs.length === 0) {
-                        selector.innerHTML = "<option value=''>No local hardware cameras found</option>";
-                        return;
-                    }
-                    videoInputs.forEach((device, index) => {
-                        const opt = document.createElement('option');
-                        opt.value = device.deviceId;
-                        opt.text = device.label || `Camera Hardware Device ${index + 1}`;
-                        selector.appendChild(opt);
-                    });
+            navigator.mediaDevices.enumerateDevices().then(devices => {
+                const selector = document.getElementById('webcam-selector');
+                selector.innerHTML = "";
+                const videoInputs = devices.filter(device => device.kind === 'videoinput');
+                if(videoInputs.length === 0) {
+                    selector.innerHTML = "<option value=''>No local hardware cameras found</option>";
+                    return;
+                }
+                videoInputs.forEach((device, index) => {
+                    const opt = document.createElement('option');
+                    opt.value = device.deviceId;
+                    opt.text = device.label || `Camera Hardware Device ${index + 1}`;
+                    selector.appendChild(opt);
                 });
+            });
         }
 
         function launchProjectorWindow() {
@@ -312,13 +378,17 @@
                             position: absolute; z-index: 3; width: 85%; color: #fff; font-size: 4.5rem; font-weight: bold; 
                             text-shadow: 3px 3px 8px rgba(0,0,0,0.9), -3px -3px 8px rgba(0,0,0,0.9); line-height: 1.3; 
                             white-space: pre-line; display: none; box-sizing: border-box; font-family: inherit; text-align: center;
+                            opacity: 0; transition: opacity 0.4s ease-in-out;
                         }
-                        #live-img, #live-vid, #live-webcam { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
-                        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
+                        #live-img, #live-vid, #live-webcam, #live-bg-video { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; opacity: 0; transition: opacity 0.4s ease-in-out; }
+                        #live-bg-video { z-index: 0; }
+                        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; opacity: 0; transition: opacity 0.4s ease-in-out; }
+                        .visible { opacity: 1 !important; }
                     </style>
                 </head>
                 <body>
                     <div id="canvas-viewport">
+                        <video id="live-bg-video" autoplay loop muted playsinline></video>
                         <video id="live-webcam" autoplay playsinline></video>
                         <img id="live-vid" src="">
                         <img id="live-img" src="">
@@ -336,36 +406,23 @@
             stopHardwareCamera();
             const deviceId = document.getElementById('webcam-selector').value;
             if(!deviceId) return;
-
-            const constraints = { video: { deviceId: { exact: deviceId } } };
-            
-            navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+            navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } } }).then(stream => {
                 activeHardwareStream = stream;
-                
                 const pCam = document.getElementById('prev-webcam');
-                pCam.srcObject = stream;
-                pCam.style.display = 'block';
-
+                pCam.srcObject = stream; pCam.style.display = 'block';
                 if (projWindow && !projWindow.closed) {
                     const lCam = projWindow.document.getElementById('live-webcam');
-                    lCam.srcObject = stream;
-                    lCam.style.display = 'block';
+                    lCam.srcObject = stream; lCam.style.display = 'block'; lCam.classList.add('visible');
                 }
-            }).catch(err => alert("Video Capture Error: " + err.message));
+            });
         }
 
         function stopHardwareCamera() {
-            if(activeHardwareStream) {
-                activeHardwareStream.getTracks().forEach(track => track.stop());
-                activeHardwareStream = null;
-            }
+            if(activeHardwareStream) { activeHardwareStream.getTracks().forEach(track => track.stop()); activeHardwareStream = null; }
             document.getElementById('prev-webcam').style.display = 'none';
-            document.getElementById('prev-webcam').srcObject = null;
-
             if (projWindow && !projWindow.closed) {
                 const lCam = projWindow.document.getElementById('live-webcam');
-                lCam.style.display = 'none';
-                lCam.srcObject = null;
+                lCam.style.display = 'none'; lCam.classList.remove('visible');
             }
         }
 
@@ -386,8 +443,6 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 const xml = new DOMParser().parseFromString(e.target.result, "text/xml");
-                slideDeck = [];
-                
                 const sTitle = xml.getElementsByTagName("title")[0]?.textContent || "XML Track";
                 const sBg = xml.getElementsByTagName("background")[0]?.textContent || null;
                 const verses = xml.getElementsByTagName("verse");
@@ -401,181 +456,248 @@
                             backgroundAsset: sBg
                         });
                     }
-                } else {
-                    const lyrics = xml.getElementsByTagName("lyrics")[0]?.textContent || "";
-                    lyrics.split("\n\n").forEach((st, i) => {
-                        if(st.trim()) slideDeck.push({ type: 'TEXT', title: `${sTitle} (Stanza ${i+1})`, body: st.trim(), backgroundAsset: sBg });
-                    });
                 }
+                addToHistory(sTitle, "XML");
                 rebuildTimeline();
-                if(slideDeck.length > 0) changeSlide(0);
+                saveToLocalStorage();
+                if(slideDeck.length > 0) changeSlide(slideDeck.length - verses.length);
             };
             reader.readAsText(files[0]);
         }
 
         function handleMedia(files) {
-            slideDeck = [];
-            let imgs = files.filter(f => f.type.startsWith('image/')).sort((a,b)=>a.name.localeCompare(b.name, undefined, {numeric:true}));
-            let pdfs = files.filter(f => f.name.endsWith('.pdf'));
-
-            if(pdfs.length > 0) {
+            let loaded = 0;
+            files.forEach((file) => {
                 const reader = new FileReader();
-                reader.onload = function(e) {
-                    pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
-                        localPdfRef = pdf;
-                        for(let i=1; i<=pdf.numPages; i++) {
-                            slideDeck.push({ type: 'PDF', page: i, title: `PDF / LibreOffice Page ${i}` });
-                        }
-                        rebuildTimeline();
-                    });
-                };
-                reader.readAsArrayBuffer(pdfs[0]);
-            } else if (imgs.length > 0) {
-                let loaded = 0;
-                imgs.forEach((file, i) => {
-                    const reader = new FileReader();
+                if(file.type.startsWith('video/')) {
                     reader.onload = function(e) {
-                        slideDeck[i] = { type: 'IMAGE', url: e.target.result, title: file.name };
-                        if(++loaded === imgs.length) { slideDeck = slideDeck.filter(Boolean); rebuildTimeline(); }
+                        slideDeck.push({ type: 'VIDEO_BG', url: e.target.result, title: `Loop: ${file.name}` });
+                        finalizeMediaLoad(files.length, ++loaded);
                     };
                     reader.readAsDataURL(file);
-                });
-            }
+                } else if(file.type.startsWith('image/')) {
+                    reader.onload = function(e) {
+                        slideDeck.push({ type: 'IMAGE', url: e.target.result, title: file.name });
+                        finalizeMediaLoad(files.length, ++loaded);
+                    };
+                    reader.readAsDataURL(file);
+                } else if(file.name.endsWith('.pdf')) {
+                    reader.onload = function(e) {
+                        pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
+                            localPdfRef = pdf;
+                            for(let i=1; i<=pdf.numPages; i++) {
+                                slideDeck.push({ type: 'PDF', page: i, title: `PDF: Page ${i}` });
+                            }
+                            finalizeMediaLoad(files.length, ++loaded);
+                        });
+                    };
+                    reader.readAsArrayBuffer(file);
+                }
+            });
+        }
+
+        function finalizeMediaLoad(target, current) {
+            if(current === target) { rebuildTimeline(); saveToLocalStorage(); }
         }
 
         function updateActiveSlideContent() {
             if (activeIndex < 0 || slideDeck[activeIndex].type !== 'TEXT') return;
             const updatedText = document.getElementById('slide-editor-text').value;
-            
             slideDeck[activeIndex].body = updatedText;
             document.getElementById(`item-${activeIndex}`).querySelector('small').innerText = updatedText.substring(0, 50) + '...';
             document.getElementById('prev-text').innerText = updatedText;
-            
             if (projWindow && !projWindow.closed) {
                 projWindow.document.getElementById('live-txt').innerText = updatedText;
             }
+            saveToLocalStorage();
         }
 
         function pushBibleScripture() {
             const book = document.getElementById('b-book').value;
             const ch = document.getElementById('b-chap').value;
             const vs = document.getElementById('b-vs').value;
-            const bodyTxt = document.getElementById('b-text').value || "...No verse text entered...";
-            
+            const bodyTxt = document.getElementById('b-text').value || "...";
             const compiledText = `"${book} ${ch}:${vs}"\n\n${bodyTxt}`;
             
-            slideDeck = [{ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: compiledText, backgroundAsset: null }];
+            slideDeck.push({ type: 'TEXT', title: `${book} ${ch}:${vs}`, body: compiledText, backgroundAsset: null });
+            addToHistory(`${book} ${ch}:${vs}`, "BIBLE");
             rebuildTimeline();
-            changeSlide(0);
+            saveToLocalStorage();
+            changeSlide(slideDeck.length - 1);
         }
 
         function broadcastNDI(state) {
             const url = state ? document.getElementById('ndi-url').value : "";
             document.getElementById('prev-video').src = url;
             document.getElementById('prev-video').style.display = state ? 'block' : 'none';
-            
             if (projWindow && !projWindow.closed) {
                 const targetVid = projWindow.document.getElementById('live-vid');
-                targetVid.src = url;
-                targetVid.style.display = state ? 'block' : 'none';
+                targetVid.src = url; targetVid.style.display = state ? 'block' : 'none';
+                if(state) targetVid.classList.add('visible'); else targetVid.classList.remove('visible');
             }
         }
 
         function rebuildTimeline() {
             const t = document.getElementById('timeline'); t.innerHTML = "";
-            if(!slideDeck.length) { t.innerHTML = "<li>Timeline empty.</li>"; return; }
+            if(!slideDeck.length) { t.innerHTML = `<li style="color:#666; text-align:center; padding:40px 0;">Timeline empty.</li>`; return; }
             slideDeck.forEach((s, i) => {
                 const li = document.createElement('li'); li.id = `item-${i}`;
-                li.innerHTML = `<strong>[${s.type}] ${s.title}</strong><br><small>${s.body ? s.body.substring(0,50) : 'Visual Slide Graphic'}</small>`;
+                li.setAttribute('draggable', 'true');
+                li.innerHTML = `<strong>[${s.type}] ${s.title}</strong><br><small>${s.body ? s.body.substring(0,50) : 'Visual Media Asset'}</small>
+                                <button class="delete-btn" onclick="removeTimelineItem(event, ${i})">&times;</button>`;
                 li.onclick = () => changeSlide(i);
                 t.appendChild(li);
             });
-            activeIndex = -1;
-            document.getElementById('slide-editor-text').value = "";
         }
 
+        function removeTimelineItem(e, idx) {
+            e.stopPropagation();
+            slideDeck.splice(idx, 1);
+            rebuildTimeline();
+            saveToLocalStorage();
+            activeIndex = -1;
+        }
+
+        // HTML5 SLIDE DRAG REORDERING ENGINE
+        function setupDragAndDropTimeline() {
+            const timeline = document.getElementById('timeline');
+            let draggedIdx = null;
+
+            timeline.addEventListener('dragstart', (e) => {
+                if(e.target.tagName !== 'LI') return;
+                draggedIdx = parseInt(e.target.id.split('-')[1]);
+                e.target.classList.add('dragging');
+            });
+
+            timeline.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                const targetLi = e.target.closest('li');
+                if(!targetLi || targetLi.classList.contains('dragging')) return;
+                
+                const bounding = targetLi.getBoundingClientRect();
+                const offset = e.clientY - bounding.top - (bounding.height / 2);
+                if(offset > 0) {
+                    timeline.insertBefore(document.querySelector('.dragging'), targetLi.nextSibling);
+                } else {
+                    timeline.insertBefore(document.querySelector('.dragging'), targetLi);
+                }
+            });
+
+            timeline.addEventListener('dragend', (e) => {
+                e.target.classList.remove('dragging');
+                const cleanOrderDeck = [];
+                timeline.querySelectorAll('li').forEach(li => {
+                    const oldIdx = parseInt(li.id.split('-')[1]);
+                    cleanOrderDeck.push(slideDeck[oldIdx]);
+                });
+                slideDeck = cleanOrderDeck;
+                rebuildTimeline();
+                saveToLocalStorage();
+            });
+        }
+
+        // SYSTEM PRESENTATION DISPLAY ROUTING WITH CROSSFADES
         function changeSlide(idx) {
             if(idx < 0 || idx >= slideDeck.length) return;
             if(activeIndex >= 0) document.getElementById(`item-${activeIndex}`)?.classList.remove('active');
             
             activeIndex = idx;
-            const currentItem = document.getElementById(`item-${activeIndex}`);
-            if(currentItem) {
-                currentItem.classList.add('active');
-                currentItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
+            document.getElementById(`item-${activeIndex}`)?.classList.add('active');
 
             const slide = slideDeck[activeIndex];
             
-            document.getElementById('prev-text').style.display = 'none';
-            document.getElementById('prev-img').style.display = 'none';
-            document.getElementById('prev-pdf').style.display = 'none';
-            
+            // Soft-reset text overlays before injecting
+            const pTxt = document.getElementById('prev-text');
+            pTxt.style.opacity = 0;
+
             if (projWindow && !projWindow.closed) {
-                projWindow.document.getElementById('live-txt').style.display = 'none';
-                projWindow.document.getElementById('live-img').style.display = 'none';
-                projWindow.document.getElementById('live-pdf').style.display = 'none';
+                projWindow.document.getElementById('live-txt').classList.remove('visible');
             }
 
-            if(slide.type === 'TEXT') {
-                document.getElementById('slide-editor-text').value = slide.body;
-                document.getElementById('slide-editor-text').disabled = false;
-                document.getElementById('prev-text').innerText = slide.body;
-                document.getElementById('prev-text').style.display = 'block';
+            setTimeout(() => {
+                // Clear active media layer tracks
+                document.getElementById('prev-img').style.display = 'none';
+                document.getElementById('prev-pdf').style.display = 'none';
                 
-                // Track & Render dedicated slide backgrounds if assigned
-                if(slide.backgroundAsset) {
-                    document.getElementById('prev-img').src = slide.backgroundAsset;
-                    document.getElementById('prev-img').style.display = 'block';
-                }
-
                 if (projWindow && !projWindow.closed) {
-                    const pTxt = projWindow.document.getElementById('live-txt');
-                    pTxt.innerText = slide.body;
-                    pTxt.style.display = 'block';
+                    projWindow.document.getElementById('live-img').style.display = 'none';
+                    projWindow.document.getElementById('live-pdf').style.display = 'none';
+                    projWindow.document.getElementById('live-img').classList.remove('visible');
+                    projWindow.document.getElementById('live-pdf').classList.remove('visible');
+                }
 
+                if(slide.type === 'TEXT') {
+                    document.getElementById('slide-editor-text').value = slide.body;
+                    document.getElementById('slide-editor-text').disabled = false;
+                    
+                    pTxt.innerText = slide.body; pTxt.style.opacity = 1;
+                    
                     if(slide.backgroundAsset) {
-                        const pImg = projWindow.document.getElementById('live-img');
-                        pImg.src = slide.backgroundAsset;
-                        pImg.style.display = 'block';
+                        handleBackgroundAssetInjection(slide.backgroundAsset);
+                    }
+
+                    if (projWindow && !projWindow.closed) {
+                        const lTxt = projWindow.document.getElementById('live-txt');
+                        lTxt.innerText = slide.body; lTxt.classList.add('visible');
+                        if(slide.backgroundAsset) handleBackgroundAssetInjection(slide.backgroundAsset);
+                    }
+                } else if(slide.type === 'VIDEO_BG') {
+                    handleBackgroundAssetInjection(slide.url);
+                } else {
+                    document.getElementById('slide-editor-text').value = "[Visual Media Slide Selected - Non-Editable]";
+                    document.getElementById('slide-editor-text').disabled = true;
+                    
+                    if (slide.type === 'IMAGE') {
+                        const pImg = document.getElementById('prev-img'); pImg.src = slide.url; pImg.style.display = 'block';
+                        if (projWindow && !projWindow.closed) {
+                            const lImg = projWindow.document.getElementById('live-img');
+                            lImg.src = slide.url; lImg.style.display = 'block'; setTimeout(() => lImg.classList.add('visible'), 5);
+                        }
+                    } else if (slide.type === 'PDF' && localPdfRef) {
+                        localPdfRef.getPage(slide.page).then(page => {
+                            const canvas = document.getElementById('prev-pdf');
+                            const ctx = canvas.getContext('2d'); const vp = page.getViewport({ scale: 0.5 });
+                            canvas.height = vp.height; canvas.width = vp.width;
+                            page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => canvas.style.display = 'block');
+
+                            if (projWindow && !projWindow.closed) {
+                                const pCanvas = projWindow.document.getElementById('live-pdf');
+                                const pCtx = pCanvas.getContext('2d'); const pVp = page.getViewport({ scale: 2.0 });
+                                pCanvas.height = pVp.height; pCanvas.width = pVp.width;
+                                page.render({ canvasContext: pCtx, viewport: pVp }).promise.then(() => {
+                                    pCanvas.style.display = 'block'; pCanvas.classList.add('visible');
+                                });
+                            }
+                        });
                     }
                 }
-            } else {
-                document.getElementById('slide-editor-text').value = "[Visual Media Slide Selected - Non-Editable]";
-                document.getElementById('slide-editor-text').disabled = true;
-                
-                if (slide.type === 'IMAGE') {
-                    document.getElementById('prev-img').src = slide.url;
-                    document.getElementById('prev-img').style.display = 'block';
-                    
-                    if (projWindow && !projWindow.closed) {
-                        const pImg = projWindow.document.getElementById('live-img');
-                        pImg.src = slide.url;
-                        pImg.style.display = 'block';
-                    }
-                } else if (slide.type === 'PDF' && localPdfRef) {
-                    localPdfRef.getPage(slide.page).then(page => {
-                        const canvas = document.getElementById('prev-pdf');
-                        const ctx = canvas.getContext('2d');
-                        const vp = page.getViewport({ scale: 0.5 });
-                        canvas.height = vp.height; canvas.width = vp.width;
-                        page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
-                            canvas.style.display = 'block';
-                        });
+                applyLiveStyle();
+            }, 200);
+        }
 
-                        if (projWindow && !projWindow.closed) {
-                            const pCanvas = projWindow.document.getElementById('live-pdf');
-                            const pCtx = pCanvas.getContext('2d');
-                            const pVp = page.getViewport({ scale: 2.0 });
-                            pCanvas.height = pVp.height; pCanvas.width = pVp.width;
-                            page.render({ canvasContext: pCtx, viewport: pVp }).promise.then(() => {
-                                pCanvas.style.display = 'block';
-                            });
-                        }
-                    });
+        // DETECTS CHANNELS & MOUNT EITHER IMAGE OR LOOPING VIDEO BACKDROP
+        function handleBackgroundAssetInjection(assetPath) {
+            const isVideo = assetPath.includes('video/') || assetPath.endsWith('.mp4') || assetPath.startsWith('data:video/');
+            const pVid = document.getElementById('prev-bg-video');
+            const pImg = document.getElementById('prev-img');
+
+            if(isVideo) {
+                pImg.style.display = 'none'; pVid.src = assetPath; pVid.style.display = 'block';
+            } else {
+                pVid.style.display = 'none'; pVid.src = ""; pImg.src = assetPath; pImg.style.display = 'block';
+            }
+
+            if (projWindow && !projWindow.closed) {
+                const lVid = projWindow.document.getElementById('live-bg-video');
+                const lImg = projWindow.document.getElementById('live-img');
+                if(isVideo) {
+                    lImg.style.display = 'none'; lImg.classList.remove('visible');
+                    lVid.src = assetPath; lVid.style.display = 'block'; lVid.classList.add('visible');
+                } else {
+                    lVid.style.display = 'none'; lVid.src = ""; lVid.classList.remove('visible');
+                    lImg.src = assetPath; lImg.style.display = 'block'; lImg.classList.add('visible');
                 }
             }
-            applyLiveStyle();
         }
 
         function applyLiveStyle() {
@@ -589,20 +711,27 @@
 
             const pt = document.getElementById('prev-text');
             const frame = document.getElementById('preview-canvas-frame');
-            pt.style.fontFamily = style.font;
-            pt.style.fontSize = (style.size * 0.25) + "rem";
-            pt.style.textAlign = style.align;
-            frame.style.alignItems = style.valign;
-            pt.style.color = style.color;
+            pt.style.fontFamily = style.font; pt.style.fontSize = (style.size * 0.25) + "rem";
+            pt.style.textAlign = style.align; frame.style.alignItems = style.valign; pt.style.color = style.color;
 
             if (projWindow && !projWindow.closed) {
                 const pTxt = projWindow.document.getElementById('live-txt');
                 const pViewport = projWindow.document.getElementById('canvas-viewport');
-                pTxt.style.fontFamily = style.font;
-                pTxt.style.fontSize = style.size + "rem";
-                pTxt.style.textAlign = style.align;
-                pViewport.style.alignItems = style.valign;
-                pTxt.style.color = style.color;
+                pTxt.style.fontFamily = style.font; pTxt.style.fontSize = style.size + "rem";
+                pTxt.style.textAlign = style.align; pViewport.style.alignItems = style.valign; pTxt.style.color = style.color;
+            }
+        }
+
+        // BROWSER LOCALSTORAGE BACKUP MANAGEMENT
+        function saveToLocalStorage() {
+            localStorage.setItem('mediaDesk_slideDeck', JSON.stringify(slideDeck));
+        }
+
+        function loadFromLocalStorage() {
+            const cached = localStorage.getItem('mediaDesk_slideDeck');
+            if (cached) {
+                slideDeck = JSON.parse(cached);
+                rebuildTimeline();
             }
         }
 
@@ -612,15 +741,19 @@
                 document.getElementById('prev-img').style.display = 'none';
                 document.getElementById('prev-pdf').style.display = 'none';
                 document.getElementById('prev-video').style.display = 'none';
+                document.getElementById('prev-bg-video').style.display = 'none';
+                document.getElementById('prev-bg-video').src = "";
                 stopHardwareCamera();
             }
 
             if (projWindow && !projWindow.closed) {
-                projWindow.document.getElementById('live-txt').innerText = "";
+                projWindow.document.getElementById('live-txt').classList.remove('visible');
                 if(mode === 'ALL') {
                     projWindow.document.getElementById('live-img').style.display = 'none';
                     projWindow.document.getElementById('live-pdf').style.display = 'none';
                     projWindow.document.getElementById('live-vid').style.display = 'none';
+                    projWindow.document.getElementById('live-bg-video').style.display = 'none';
+                    projWindow.document.getElementById('live-bg-video').src = "";
                 }
             }
         }
