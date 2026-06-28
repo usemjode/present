@@ -15,16 +15,17 @@
         .item-list li { background: #26262f; padding: 10px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; border-left: 4px solid transparent; }
         .item-list li.active { border-left-color: var(--accent); background: #2d2d3d; }
         input, select, button, textarea { width: 100%; padding: 8px; background: #141419; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem; }
-        textarea { resize: none; font-family: inherit; height: 100px; }
+        textarea { resize: none; font-family: inherit; height: 80px; }
         button { background: var(--accent); font-weight: bold; border: none; cursor: pointer; margin-top: 5px; }
         button:hover { opacity: 0.9; }
         .preview-container { background: #000; aspect-ratio: 16/9; width: 100%; border: 1px solid #333; position: relative; overflow: hidden; display: flex; justify-content: center; align-items: center; }
         #preview-canvas-frame { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; background: #000; }
         #prev-text { font-size: 1rem; color: #fff; text-align: center; z-index: 3; white-space: pre-line; font-weight: bold; padding: 10px; }
-        #prev-img, #prev-video { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
+        #prev-img, #prev-video, #prev-webcam { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
         #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
+        .video-tutorial-container { position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; border: 1px solid #444; }
     </style>
 </head>
 <body>
@@ -35,6 +36,18 @@
         <div class="title">Media Ingestion</div>
         <div class="drop-zone" id="xml-drop">Drop XML (Hymnal / Song)</div>
         <div class="drop-zone" id="media-drop">Drop PDF or LibreOffice PNG Images</div>
+
+        <div class="title">Hardware & Local Webcams</div>
+        <div class="control-group">
+            <label>Select Local Device Capture Source</label>
+            <select id="webcam-selector">
+                <option value="">-- Scanning for Input Hardware... --</option>
+            </select>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:5px;">
+                <button onclick="startHardwareCamera()" style="background:#ffb703; color:#121214;">Start Camera</button>
+                <button onclick="stopHardwareCamera()" style="background:#d90429;">Kill Camera</button>
+            </div>
+        </div>
 
         <div class="title">NDI Network Camera Feed</div>
         <div class="control-group">
@@ -58,25 +71,19 @@
     </div>
 
     <div class="panel" style="background: #17171c;">
+        <div class="title">System Help & Tutorial Documentation</div>
+        <div class="video-tutorial-container">
+            <iframe width="100%" height="100%" src="https://www.youtube.com/embed/dQw4w9WgXcQ" title="System Walkthrough Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen style="border:none;"></iframe>
+        </div>
+
         <div class="title">Presentation Active Workspace</div>
         
         <div class="control-group" id="editor-workspace">
             <label style="font-weight: bold; color: var(--accent);">Live Slide Content Editor</label>
             <textarea id="slide-editor-text" placeholder="Select a text slide below to live-edit its content here..." oninput="updateActiveSlideContent()"></textarea>
-            <div style="font-size: 0.75rem; color: #888;">Changes typed here will update the projector screen immediately.</div>
         </div>
 
-        <div class="control-group" style="border: 1px solid #444; background: #1e1e24;">
-            <label style="font-weight: bold; color: #4c956c;">LibreOffice External Edit Suite</label>
-            <p style="font-size: 0.8rem; margin: 5px 0; color: #ccc;">To present custom `.odp` or `.pptx` slides cleanly:</p>
-            <ol style="font-size: 0.75rem; color: #aaa; margin: 0; padding-left: 15px;">
-                <li>Open your file inside desktop <strong>LibreOffice Impress</strong>.</li>
-                <li>Go to <strong>File -> Export...</strong> and select <strong>PNG</strong> or <strong>PDF</strong>.</li>
-                <li>Drag and drop those exported files into the <strong>Media Ingestion</strong> zone on the left.</li>
-            </ol>
-        </div>
-
-        <div class="title" style="margin-top: 10px;">Active Sequence Timeline</div>
+        <div class="title">Active Sequence Timeline</div>
         <ul class="item-list" id="timeline">
             <li style="color:#666; text-align:center; padding:40px 0;">Timeline empty. Ingest presentation sources via the configuration module.</li>
         </ul>
@@ -86,6 +93,7 @@
         <div class="title">Live Confidence Monitor</div>
         <div class="preview-container">
             <div id="preview-canvas-frame">
+                <video id="prev-webcam" autoplay playsinline muted></video>
                 <img id="prev-video" src="">
                 <img id="prev-img" src="">
                 <canvas id="prev-pdf"></canvas>
@@ -97,10 +105,10 @@
         <div class="control-group">
             <label>Overlay Typography Font Style</label>
             <select id="cfg-font" onchange="applyLiveStyle()">
-                <option value="Arial">Arial Black (Bold Clean)</option>
-                <option value="'Times New Roman'">Times New Roman (Traditional)</option>
-                <option value="'Segoe UI'">Segoe UI (Modern Sans)</option>
-                <option value="Georgia">Georgia (Elegant Serif)</option>
+                <option value="'Segoe UI', Arial, sans-serif">Segoe UI (Modern Sans)</option>
+                <option value="Arial, sans-serif">Arial Black (Bold Clean)</option>
+                <option value="'Times New Roman', serif">Times New Roman (Traditional)</option>
+                <option value="Georgia, serif">Georgia (Elegant Serif)</option>
             </select>
 
             <label>Base Typography Sizing</label>
@@ -137,26 +145,53 @@
         let slideDeck = [];
         let activeIndex = -1;
         let localPdfRef = null;
-        let projWindow = null; // Direct object link to sub-window
+        let projWindow = null;
+        let activeHardwareStream = null;
 
-        // Inject projector document structure dynamically to handle file permissions instantly
+        // Populate local capture devices on page load
+        navigator.mediaDevices?.enumerateDevices()
+            .then(devices => {
+                const selector = document.getElementById('webcam-selector');
+                selector.innerHTML = "";
+                const videoInputs = devices.filter(device => device.kind === 'videoinput');
+                
+                if(videoInputs.length === 0) {
+                    selector.innerHTML = "<option value=''>No local cameras found</option>";
+                    return;
+                }
+                videoInputs.forEach((device, index) => {
+                    const opt = document.createElement('option');
+                    opt.value = device.deviceId;
+                    opt.text = device.label || `Local Camera/Capture Card ${index + 1}`;
+                    selector.appendChild(opt);
+                });
+            }).catch(() => {
+                document.getElementById('webcam-selector').innerHTML = "<option value=''>Camera Permissions Denied</option>";
+            });
+
         function launchProjectorWindow() {
             projWindow = window.open('', 'ProjectorScreen', 'width=1280,height=720');
             projWindow.document.write(`
                 <!DOCTYPE html>
-                <html>
+                <html lang="en">
                 <head>
+                    <meta charset="UTF-8">
                     <title>Live Stream Output Canvas</title>
                     <style>
-                        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: Arial, sans-serif; }
+                        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: 'Segoe UI', Arial, sans-serif; }
                         #canvas-viewport { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-                        #live-txt { position: absolute; z-index: 3; width: 85%; color: #fff; font-size: 4.5rem; font-weight: bold; text-shadow: 3px 3px 8px rgba(0,0,0,0.9), -3px -3px 8px rgba(0,0,0,0.9); line-height: 1.3; white-space: pre-line; display: none; box-sizing: border-box; }
-                        #live-img, #live-vid { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
+                        #live-txt { 
+                            position: absolute; z-index: 3; width: 85%; color: #fff; font-size: 4.5rem; font-weight: bold; 
+                            text-shadow: 3px 3px 8px rgba(0,0,0,0.9), -3px -3px 8px rgba(0,0,0,0.9); line-height: 1.3; 
+                            white-space: pre-line; display: none; box-sizing: border-box; font-family: inherit; text-align: center;
+                        }
+                        #live-img, #live-vid, #live-webcam { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
                         #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
                     </style>
                 </head>
                 <body>
                     <div id="canvas-viewport">
+                        <video id="live-webcam" autoplay playsinline></video>
                         <img id="live-vid" src="">
                         <img id="live-img" src="">
                         <canvas id="live-pdf"></canvas>
@@ -166,8 +201,47 @@
                 </html>
             `);
             projWindow.document.close();
-            // Push active styles down immediately
             setTimeout(applyLiveStyle, 200);
+        }
+
+        // Camera Hardware Pipeline Controls
+        function startHardwareCamera() {
+            stopHardwareCamera(); // clear active track layers
+            const deviceId = document.getElementById('webcam-selector').value;
+            if(!deviceId) return;
+
+            const constraints = { video: { deviceId: { exact: deviceId }, width: 1920, height: 1080 } };
+            
+            navigator.mediaDevices.getUserMedia(constraints).then(stream => {
+                activeHardwareStream = stream;
+                
+                // Mount to local operator preview interface
+                const pCam = document.getElementById('prev-webcam');
+                pCam.srcObject = stream;
+                pCam.style.display = 'block';
+
+                // Push and handle video object streaming natively across window scopes
+                if (projWindow && !projWindow.closed) {
+                    const lCam = projWindow.document.getElementById('live-webcam');
+                    lCam.srcObject = stream;
+                    lCam.style.display = 'block';
+                }
+            }).catch(err => alert("Could not open hardware video layer: " + err.message));
+        }
+
+        function stopHardwareCamera() {
+            if(activeHardwareStream) {
+                activeHardwareStream.getTracks().forEach(track => track.stop());
+                activeHardwareStream = null;
+            }
+            document.getElementById('prev-webcam').style.display = 'none';
+            document.getElementById('prev-webcam').srcObject = null;
+
+            if (projWindow && !projWindow.closed) {
+                const lCam = projWindow.document.getElementById('live-webcam');
+                lCam.style.display = 'none';
+                lCam.srcObject = null;
+            }
         }
 
         setupDrop('xml-drop', handleXml);
@@ -220,7 +294,7 @@
                     pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
                         localPdfRef = pdf;
                         for(let i=1; i<=pdf.numPages; i++) {
-                            slideDeck.push({ type: 'PDF', page: i, title: `PDF / LibreOffice Export Page ${i}` });
+                            slideDeck.push({ type: 'PDF', page: i, title: `PDF / LibreOffice Page ${i}` });
                         }
                         rebuildTimeline();
                     });
@@ -245,7 +319,6 @@
             
             slideDeck[activeIndex].body = updatedText;
             document.getElementById(`item-${activeIndex}`).querySelector('small').innerText = updatedText.substring(0, 50) + '...';
-            
             document.getElementById('prev-text').innerText = updatedText;
             
             if (projWindow && !projWindow.closed) {
@@ -280,7 +353,7 @@
             if(!slideDeck.length) { t.innerHTML = "<li>Timeline empty.</li>"; return; }
             slideDeck.forEach((s, i) => {
                 const li = document.createElement('li'); li.id = `item-${i}`;
-                li.innerHTML = `<strong>[${s.type}] ${s.title}</strong><br><small>${s.body ? s.body.substring(0,50) : 'Visual Slide Graphic Matrix'}</small>`;
+                li.innerHTML = `<strong>[${s.type}] ${s.title}</strong><br><small>${s.body ? s.body.substring(0,50) : 'Visual Slide Graphic'}</small>`;
                 li.onclick = () => changeSlide(i);
                 t.appendChild(li);
             });
@@ -301,7 +374,6 @@
 
             const slide = slideDeck[activeIndex];
             
-            // Clear current states
             document.getElementById('prev-text').style.display = 'none';
             document.getElementById('prev-img').style.display = 'none';
             document.getElementById('prev-pdf').style.display = 'none';
@@ -315,7 +387,6 @@
             if(slide.type === 'TEXT') {
                 document.getElementById('slide-editor-text').value = slide.body;
                 document.getElementById('slide-editor-text').disabled = false;
-                
                 document.getElementById('prev-text').innerText = slide.body;
                 document.getElementById('prev-text').style.display = 'block';
                 
@@ -338,7 +409,6 @@
                         pImg.style.display = 'block';
                     }
                 } else if (slide.type === 'PDF' && localPdfRef) {
-                    // Render control view preview frame
                     localPdfRef.getPage(slide.page).then(page => {
                         const canvas = document.getElementById('prev-pdf');
                         const ctx = canvas.getContext('2d');
@@ -348,7 +418,6 @@
                             canvas.style.display = 'block';
                         });
 
-                        // Instantly render matching high resolution context to projector window frame
                         if (projWindow && !projWindow.closed) {
                             const pCanvas = projWindow.document.getElementById('live-pdf');
                             const pCtx = pCanvas.getContext('2d');
@@ -398,6 +467,7 @@
                 document.getElementById('prev-img').style.display = 'none';
                 document.getElementById('prev-pdf').style.display = 'none';
                 document.getElementById('prev-video').style.display = 'none';
+                stopHardwareCamera();
             }
 
             if (projWindow && !projWindow.closed) {
