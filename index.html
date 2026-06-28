@@ -22,7 +22,6 @@
         #preview-canvas-frame { width: 100%; height: 100%; position: relative; display: flex; justify-content: center; align-items: center; background: #000; }
         #prev-text { font-size: 1rem; color: #fff; text-align: center; z-index: 3; white-space: pre-line; font-weight: bold; padding: 10px; }
         #prev-img, #prev-video, #prev-webcam { position: absolute; width:100%; height:100%; object-fit:cover; z-index:1; display:none; }
-        #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
         .video-tutorial-container { position: relative; width: 100%; aspect-ratio: 16/9; border-radius: 6px; overflow: hidden; border: 1px solid #444; }
@@ -30,6 +29,7 @@
 </head>
 <body>
 
+    <!-- LEFT PANEL: CONFIGURATION, MEDIA, & CAMERA CONTROLS -->
     <div class="panel">
         <button onclick="launchProjectorWindow()" style="background:#4c956c; font-size: 1rem; padding: 12px;">Step 1: Launch External Projector Window</button>
         
@@ -70,6 +70,7 @@
         </div>
     </div>
 
+    <!-- MIDDLE PANEL: WORKSPACE, VIDEO TUTORIAL, & SEQUENCE -->
     <div class="panel" style="background: #17171c;">
         <div class="title">System Help & Tutorial Documentation</div>
         <div class="video-tutorial-container">
@@ -89,6 +90,7 @@
         </ul>
     </div>
 
+    <!-- RIGHT PANEL: CUSTOMIZATION ENGINE & PREVIEW -->
     <div class="panel" style="border-right:none; border-left:1px solid #2d2d35;">
         <div class="title">Live Confidence Monitor</div>
         <div class="preview-container">
@@ -96,7 +98,8 @@
                 <video id="prev-webcam" autoplay playsinline muted></video>
                 <img id="prev-video" src="">
                 <img id="prev-img" src="">
-                <canvas id="prev-pdf"></canvas>
+                <!-- Hidden background converter canvas -->
+                <canvas id="hidden-pdf-canvas" style="display: none;"></canvas>
                 <div id="prev-text"></div>
             </div>
         </div>
@@ -148,7 +151,6 @@
         let projWindow = null;
         let activeHardwareStream = null;
 
-        // Populate local capture devices on page load
         navigator.mediaDevices?.enumerateDevices()
             .then(devices => {
                 const selector = document.getElementById('webcam-selector');
@@ -186,7 +188,6 @@
                             white-space: pre-line; display: none; box-sizing: border-box; font-family: inherit; text-align: center;
                         }
                         #live-img, #live-vid, #live-webcam { position: absolute; width: 100%; height: 100%; object-fit: cover; z-index: 1; display: none; }
-                        #live-pdf { position: absolute; max-width: 100%; max-height: 100%; z-index: 2; display: none; }
                     </style>
                 </head>
                 <body>
@@ -194,7 +195,6 @@
                         <video id="live-webcam" autoplay playsinline></video>
                         <img id="live-vid" src="">
                         <img id="live-img" src="">
-                        <canvas id="live-pdf"></canvas>
                         <div id="live-txt"></div>
                     </div>
                 </body>
@@ -204,23 +204,18 @@
             setTimeout(applyLiveStyle, 200);
         }
 
-        // Camera Hardware Pipeline Controls
         function startHardwareCamera() {
-            stopHardwareCamera(); // clear active track layers
+            stopHardwareCamera();
             const deviceId = document.getElementById('webcam-selector').value;
             if(!deviceId) return;
-
             const constraints = { video: { deviceId: { exact: deviceId }, width: 1920, height: 1080 } };
             
             navigator.mediaDevices.getUserMedia(constraints).then(stream => {
                 activeHardwareStream = stream;
-                
-                // Mount to local operator preview interface
                 const pCam = document.getElementById('prev-webcam');
                 pCam.srcObject = stream;
                 pCam.style.display = 'block';
 
-                // Push and handle video object streaming natively across window scopes
                 if (projWindow && !projWindow.closed) {
                     const lCam = projWindow.document.getElementById('live-webcam');
                     lCam.srcObject = stream;
@@ -262,7 +257,6 @@
             reader.onload = function(e) {
                 const xml = new DOMParser().parseFromString(e.target.result, "text/xml");
                 slideDeck = [];
-                
                 const verses = xml.getElementsByTagName("verse");
                 if(verses.length > 0) {
                     for(let i=0; i<verses.length; i++) {
@@ -376,12 +370,10 @@
             
             document.getElementById('prev-text').style.display = 'none';
             document.getElementById('prev-img').style.display = 'none';
-            document.getElementById('prev-pdf').style.display = 'none';
             
             if (projWindow && !projWindow.closed) {
                 projWindow.document.getElementById('live-txt').style.display = 'none';
                 projWindow.document.getElementById('live-img').style.display = 'none';
-                projWindow.document.getElementById('live-pdf').style.display = 'none';
             }
 
             if(slide.type === 'TEXT') {
@@ -409,24 +401,28 @@
                         pImg.style.display = 'block';
                     }
                 } else if (slide.type === 'PDF' && localPdfRef) {
+                    // Turn PDF page directly into a standard cross-window flat image string
                     localPdfRef.getPage(slide.page).then(page => {
-                        const canvas = document.getElementById('prev-pdf');
+                        const canvas = document.getElementById('hidden-pdf-canvas');
                         const ctx = canvas.getContext('2d');
-                        const vp = page.getViewport({ scale: 0.5 });
-                        canvas.height = vp.height; canvas.width = vp.width;
+                        const vp = page.getViewport({ scale: 2.0 }); // High-def render factor
+                        
+                        canvas.height = vp.height; 
+                        canvas.width = vp.width;
+                        
                         page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
-                            canvas.style.display = 'block';
+                            const imgDataUrl = canvas.toDataURL('image/png');
+                            
+                            // Load as clean static image data across both views
+                            document.getElementById('prev-img').src = imgDataUrl;
+                            document.getElementById('prev-img').style.display = 'block';
+                            
+                            if (projWindow && !projWindow.closed) {
+                                const pImg = projWindow.document.getElementById('live-img');
+                                pImg.src = imgDataUrl;
+                                pImg.style.display = 'block';
+                            }
                         });
-
-                        if (projWindow && !projWindow.closed) {
-                            const pCanvas = projWindow.document.getElementById('live-pdf');
-                            const pCtx = pCanvas.getContext('2d');
-                            const pVp = page.getViewport({ scale: 2.0 });
-                            pCanvas.height = pVp.height; pCanvas.width = pVp.width;
-                            page.render({ canvasContext: pCtx, viewport: pVp }).promise.then(() => {
-                                pCanvas.style.display = 'block';
-                            });
-                        }
                     });
                 }
             }
@@ -465,7 +461,6 @@
             document.getElementById('prev-text').innerText = "";
             if(mode === 'ALL') {
                 document.getElementById('prev-img').style.display = 'none';
-                document.getElementById('prev-pdf').style.display = 'none';
                 document.getElementById('prev-video').style.display = 'none';
                 stopHardwareCamera();
             }
@@ -474,7 +469,6 @@
                 projWindow.document.getElementById('live-txt').innerText = "";
                 if(mode === 'ALL') {
                     projWindow.document.getElementById('live-img').style.display = 'none';
-                    projWindow.document.getElementById('live-pdf').style.display = 'none';
                     projWindow.document.getElementById('live-vid').style.display = 'none';
                 }
             }
