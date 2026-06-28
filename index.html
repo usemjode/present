@@ -14,7 +14,8 @@
         .item-list { list-style: none; padding: 0; margin: 0; }
         .item-list li { background: #26262f; padding: 10px; margin-bottom: 6px; border-radius: 4px; cursor: pointer; font-size: 0.85rem; border-left: 4px solid transparent; }
         .item-list li.active { border-left-color: var(--accent); background: #2d2d3d; }
-        input, select, button { width: 100%; padding: 8px; background: #141419; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem; }
+        input, select, button, textarea { width: 100%; padding: 8px; background: #141419; border: 1px solid #444; color: #fff; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem; }
+        textarea { resize: none; font-family: inherit; height: 100px; }
         button { background: var(--accent); font-weight: bold; border: none; cursor: pointer; margin-top: 5px; }
         button:hover { opacity: 0.9; }
         .preview-container { background: #000; aspect-ratio: 16/9; width: 100%; border: 1px solid #333; position: relative; overflow: hidden; display: flex; justify-content: center; align-items: center; }
@@ -24,6 +25,8 @@
         #prev-pdf { position: absolute; max-width:100%; max-height:100%; z-index:2; display:none; }
         .control-group { background: #25252d; padding: 10px; border-radius: 6px; display: flex; flex-direction: column; gap: 8px; }
         label { font-size: 0.75rem; color: #aaa; margin-bottom: -4px; display: block; }
+        .tab-btn { background: #2a2a35; border: 1px solid #444; padding: 6px; font-size: 0.8rem; }
+        .tab-btn.active { background: var(--accent); }
     </style>
 </head>
 <body>
@@ -33,7 +36,7 @@
         
         <div class="title">Media Ingestion</div>
         <div class="drop-zone" id="xml-drop">Drop XML (Hymnal / Song)</div>
-        <div class="drop-zone" id="media-drop">Drop PDF or Slide Images</div>
+        <div class="drop-zone" id="media-drop">Drop PDF or LibreOffice PNG Images</div>
 
         <div class="title">NDI Network Camera Feed</div>
         <div class="control-group">
@@ -56,8 +59,26 @@
         </div>
     </div>
 
-    <div class="panel">
-        <div class="title">Active Sequence Timeline</div>
+    <div class="panel" style="background: #17171c;">
+        <div class="title">Presentation Active Workspace</div>
+        
+        <div class="control-group" id="editor-workspace">
+            <label style="font-weight: bold; color: var(--accent);">Live Slide Content Editor</label>
+            <textarea id="slide-editor-text" placeholder="Select a text slide below to live-edit its content here..." oninput="updateActiveSlideContent()"></textarea>
+            <div style="font-size: 0.75rem; color: #888;">Changes typed here will update the projector screen immediately.</div>
+        </div>
+
+        <div class="control-group" style="border: 1px solid #444; background: #1e1e24;">
+            <label style="font-weight: bold; color: #4c956c;">LibreOffice External Edit Suite</label>
+            <p style="font-size: 0.8rem; margin: 5px 0; color: #ccc;">To present custom `.odp` or `.pptx` slides cleanly:</p>
+            <ol style="font-size: 0.75rem; color: #aaa; margin: 0; padding-left: 15px;">
+                <li>Open your file inside desktop <strong>LibreOffice Impress</strong>.</li>
+                <li>Go to <strong>File -> Export...</strong> and select <strong>PNG</strong> or <strong>PDF</strong>.</li>
+                <li>Drag and drop those exported files into the <strong>Media Ingestion</strong> zone on the left.</li>
+            </ol>
+        </div>
+
+        <div class="title" style="margin-top: 10px;">Active Sequence Timeline</div>
         <ul class="item-list" id="timeline">
             <li style="color:#666; text-align:center; padding:40px 0;">Timeline empty. Ingest presentation sources via the configuration module.</li>
         </ul>
@@ -115,19 +136,16 @@
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
         
-        // Open inter-window link channel
         const airChannel = new BroadcastChannel('church_presentation_matrix');
         let slideDeck = [];
         let activeIndex = -1;
         let localPdfRef = null;
-
         let projectorWindowHandle = null;
 
         function launchProjectorWindow() {
             projectorWindowHandle = window.open('projector.html', 'ProjectorScreen', 'width=1280,height=720,dependencies=yes');
         }
 
-        // Setup File listeners
         setupDrop('xml-drop', handleXml);
         setupDrop('media-drop', handleMedia);
 
@@ -178,7 +196,7 @@
                     pdfjsLib.getDocument(new Uint8Array(e.target.result)).promise.then(pdf => {
                         localPdfRef = pdf;
                         for(let i=1; i<=pdf.numPages; i++) {
-                            slideDeck.push({ type: 'PDF', page: i, title: `PDF Slide Page Frame ${i}` });
+                            slideDeck.push({ type: 'PDF', page: i, title: `PDF / LibreOffice Export Page ${i}` });
                         }
                         rebuildTimeline();
                     });
@@ -195,6 +213,20 @@
                     reader.readAsDataURL(file);
                 });
             }
+        }
+
+        function updateActiveSlideContent() {
+            if (activeIndex < 0 || slideDeck[activeIndex].type !== 'TEXT') return;
+            const updatedText = document.getElementById('slide-editor-text').value;
+            
+            // Modify database instance locally
+            slideDeck[activeIndex].body = updatedText;
+            
+            // Re-render display layers seamlessly
+            document.getElementById(`item-${activeIndex}`).querySelector('small').innerText = updatedText.substring(0, 50) + '...';
+            
+            document.getElementById('prev-text').innerText = updatedText;
+            airChannel.postMessage({ action: 'RENDER_SLIDE', type: 'TEXT', body: updatedText });
         }
 
         function pushBibleScripture() {
@@ -224,6 +256,7 @@
                 t.appendChild(li);
             });
             activeIndex = -1;
+            document.getElementById('slide-editor-text').value = "";
         }
 
         function changeSlide(idx) {
@@ -239,36 +272,42 @@
 
             const slide = slideDeck[activeIndex];
             
-            // Local preview layout maintenance
             document.getElementById('prev-text').style.display = 'none';
             document.getElementById('prev-img').style.display = 'none';
             document.getElementById('prev-pdf').style.display = 'none';
 
-            // Base transmission package payload configuration
             let packet = { action: 'RENDER_SLIDE', type: slide.type };
 
             if(slide.type === 'TEXT') {
+                document.getElementById('slide-editor-text').value = slide.body;
+                document.getElementById('slide-editor-text').disabled = false;
+                
                 document.getElementById('prev-text').innerText = slide.body;
                 document.getElementById('prev-text').style.display = 'block';
                 packet.body = slide.body;
                 airChannel.postMessage(packet);
-            } else if (slide.type === 'IMAGE') {
-                document.getElementById('prev-img').src = slide.url;
-                document.getElementById('prev-img').style.display = 'block';
-                packet.url = slide.url;
-                airChannel.postMessage(packet);
-            } else if (slide.type === 'PDF' && localPdfRef) {
-                localPdfRef.getPage(slide.page).then(page => {
-                    const canvas = document.getElementById('prev-pdf');
-                    const ctx = canvas.getContext('2d');
-                    const vp = page.getViewport({ scale: 0.5 });
-                    canvas.height = vp.height; canvas.width = vp.width;
-                    page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
-                        canvas.style.display = 'block';
+            } else {
+                document.getElementById('slide-editor-text').value = "[Visual Media Slide Selected - Non-Editable]";
+                document.getElementById('slide-editor-text').disabled = true;
+                
+                if (slide.type === 'IMAGE') {
+                    document.getElementById('prev-img').src = slide.url;
+                    document.getElementById('prev-img').style.display = 'block';
+                    packet.url = slide.url;
+                    airChannel.postMessage(packet);
+                } else if (slide.type === 'PDF' && localPdfRef) {
+                    localPdfRef.getPage(slide.page).then(page => {
+                        const canvas = document.getElementById('prev-pdf');
+                        const ctx = canvas.getContext('2d');
+                        const vp = page.getViewport({ scale: 0.5 });
+                        canvas.height = vp.height; canvas.width = vp.width;
+                        page.render({ canvasContext: ctx, viewport: vp }).promise.then(() => {
+                            canvas.style.display = 'block';
+                        });
                     });
-                });
-                packet.pageIndex = slide.page;
-                airChannel.postMessage(packet);
+                    packet.pageIndex = slide.page;
+                    airChannel.postMessage(packet);
+                }
             }
             applyLiveStyle();
         }
@@ -282,16 +321,14 @@
                 color: document.getElementById('cfg-color').value
             };
 
-            // Apply to local preview window target
             const pt = document.getElementById('prev-text');
             const frame = document.getElementById('preview-canvas-frame');
             pt.style.fontFamily = style.font;
-            pt.style.fontSize = (style.size * 0.25) + "rem"; // scaled for confidence frame
+            pt.style.fontSize = (style.size * 0.25) + "rem";
             pt.style.textAlign = style.align;
             frame.style.alignItems = style.valign;
             pt.style.color = style.color;
 
-            // Broadcast configuration values over layout network pipeline matrices
             airChannel.postMessage({ action: 'UPDATE_STYLE', style: style });
         }
 
@@ -307,15 +344,14 @@
         }
 
         window.addEventListener('keydown', (e) => {
+            if (document.activeElement.tagName === 'TEXTAREA' || document.activeElement.tagName === 'INPUT') return;
             if(e.key === "ArrowDown" || e.key === " ") { e.preventDefault(); changeSlide(activeIndex + 1); }
             if(e.key === "ArrowUp") { e.preventDefault(); changeSlide(activeIndex - 1); }
             if(e.key === "Escape") { e.preventDefault(); emergencyClear('ALL'); }
         });
 
-        // Intercept data requests from newly initialized secondary screen entities
         airChannel.onmessage = function(e) {
             if(e.data.action === 'REQUEST_PDF_STREAM' && localPdfRef) {
-                // Read and stream pages context natively over storage handles to projector pages
                 if(activeIndex >= 0 && slideDeck[activeIndex].type === 'PDF') {
                     airChannel.postMessage({ action: 'RENDER_SLIDE', type: 'PDF', pageIndex: slideDeck[activeIndex].page });
                 }
